@@ -10,11 +10,11 @@ const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
 const money = (value) => `${new Intl.NumberFormat('ar-SA').format(value)} ر.س`;
 const imageMap = {
-  'طقم لينن هادئ': '/manus-storage/async-images/XuqnR6s4huHdPuEZdrz6ow/image-1.webp',
-  'فستان سُهاد': '/manus-storage/async-images/XuqnR6s4huHdPuEZdrz6ow/image-2.webp',
-  'معطف غيمة': '/manus-storage/async-images/XuqnR6s4huHdPuEZdrz6ow/image-3.webp',
-  'تنورة نُور': '/manus-storage/async-images/XuqnR6s4huHdPuEZdrz6ow/image-4.webp',
-  'بليزر ليان': '/manus-storage/async-images/XuqnR6s4huHdPuEZdrz6ow/image-5.webp',
+  'طقم لينن هادئ': 'https://alnada-a6eirdjj.manus.space/manus-storage/async-images/XuqnR6s4huHdPuEZdrz6ow/image-1.webp',
+  'فستان سُهاد': 'https://alnada-a6eirdjj.manus.space/manus-storage/async-images/XuqnR6s4huHdPuEZdrz6ow/image-2.webp',
+  'معطف غيمة': 'https://alnada-a6eirdjj.manus.space/manus-storage/async-images/XuqnR6s4huHdPuEZdrz6ow/image-3.webp',
+  'تنورة نُور': 'https://alnada-a6eirdjj.manus.space/manus-storage/async-images/XuqnR6s4huHdPuEZdrz6ow/image-4.webp',
+  'بليزر ليان': 'https://alnada-a6eirdjj.manus.space/manus-storage/async-images/XuqnR6s4huHdPuEZdrz6ow/image-5.webp',
 };
 const descriptions = {
   'طقم لينن هادئ': 'قميص واسع وبنطلون مستقيم من لينن خفيف، مصمم ليتحرك مع يومكِ بسهولة وأناقة.',
