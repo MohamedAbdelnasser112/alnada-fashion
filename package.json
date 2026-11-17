@@ -1,12 +1,19 @@
 {
   "name": "alnada-fashion",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "private": true,
   "type": "module",
+  "packageManager": "npm@10.9.9",
   "scripts": {
-    "dev": "vite --host 0.0.0.0 --port 3000",
+    "dev": "node server/server.mjs",
     "build": "vite build",
-    "preview": "vite preview --host 0.0.0.0"
+    "preview": "node server/server.mjs"
+  },
+  "dependencies": {
+    "bcryptjs": "2.4.3",
+    "express": "4.21.2",
+    "multer": "^2.0.2",
+    "mysql2": "3.11.5"
   },
   "devDependencies": {
     "vite": "5.4.14"

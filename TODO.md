@@ -1,19 +1,34 @@
-# الندى | Al Nada — Delivery Outcomes
+# الندى | Al Nada — Admin System Outcomes
 
-## Delivered: Premium RTL storefront shell
-The complete Arabic RTL storefront is implemented with the approved feminine quiet-luxury visual system: blush, cream, beige and dark accents; Arabic typography; responsive spacing; rounded editorial image cards; restrained shadows; and subtle hover/motion behavior. Navigation includes الرئيسية، المتجر، أحدث المنتجات، المجموعات، من نحن، تواصل معنا plus search, favorites and cart controls.
+## Delivered: Secure admin access
+- Dedicated `/admin/login` with Arabic RTL Al Nada branding, email/username and password fields.
+- Server-side bcrypt password verification against the protected admin credentials configured in the project.
+- Expiring HttpOnly session cookie and role-gated admin APIs.
+- Authenticated admins can use `/admin`; unauthenticated API access returns 401.
 
-## Delivered: Video-led hero
-The homepage opens with an autoplaying, muted, looping 5-second fashion campaign video at `/assets/alnada-hero.mp4`, with a poster fallback, responsive crop, overlay copy for الندى, and the تسوّقي الآن CTA.
+## Delivered: Dashboard overview
+- `/admin` dashboard with products, orders, sales and customers metrics.
+- Recent orders, best-selling products, monthly sales chart and responsive premium sidebar/cards.
+- Desktop and mobile layout implemented in separate admin HTML/CSS/JS files.
 
-## Delivered: Editorial merchandising
-Featured collection cards cover ملابس حريمي، فساتين، أطقم، كاجوال، وملابس خروج. New-arrival cards include generated fashion imagery, Arabic names, regular and discounted prices, favorite controls, quick view, and أضيفي إلى السلة actions. Seasonal offer and best-seller editorial sections are included.
+## Delivered: Products and categories management
+- Add, edit and delete products.
+- Product name, description, price, compare-at price, category, sizes, colors, stock, featured state and public visibility.
+- Image URL editing plus authenticated server-side durable upload endpoint for images and MP4 media.
+- Add, edit and delete categories, update category image/order and toggle visibility.
+- Changes persist in managed MySQL tables and are exposed through the public catalog API.
 
-## Delivered: Customer shopping interactions
-Search, category filters, favorites, cart quantity state, quick-view product modal, add-to-cart, cart drawer, and checkout surface are functional in the front end and persist cart/favorite state in localStorage.
+## Delivered: Full public content management
+- Homepage announcement, hero copy/video URL, About copy, seasonal campaign, campaign image, newsletter text, contact details and social links are editable from the dashboard.
+- Public `/api/public/site` hydrates the storefront so saved content appears without manual code edits.
 
-## Delivered: Brand footer
-Footer includes brand description, social links, contact information, discovery/help links, privacy and terms links, and newsletter signup feedback.
+## Delivered: Orders management
+- Orders table with search and status filtering.
+- Status updates, deletion, totals and item details are persisted.
+- Public order creation endpoint is available for checkout integration.
 
-## Verification evidence
-`npm run build` passes successfully. The managed route manifest responds with HTTP 200 at `/manus-routes.json`. Desktop and mobile full-page visual checks were captured successfully from the managed preview.
+## Delivered: Server delivery and verification
+- Server + database capabilities enabled for the managed project.
+- Database migrations/seed data, health endpoint, Dockerfile and deploy contract prepared.
+- Verified `npm run build`, `/_app/health`, public catalog, protected login, overview and admin CRUD API access.
+- Verified the mobile login visually with local Chromium after correcting the preview screenshot tooling’s stale/cropped capture.

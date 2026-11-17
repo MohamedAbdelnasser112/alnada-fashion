@@ -1,1 +1,1 @@
-{"routes":[{"path":"/","title":"الندى | Al Nada — Premium Fashion"}]}
+{"routes":[{"path":"/","title":"الندى | Al Nada — Premium Fashion"},{"path":"/admin","title":"الندى | لوحة الإدارة"},{"path":"/admin/login","title":"الندى | دخول الإدارة"}]}

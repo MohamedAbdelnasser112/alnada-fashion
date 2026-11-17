@@ -4,224 +4,43 @@ const state = {
   cart: JSON.parse(localStorage.getItem('alnada-cart') || '[]'),
   favorites: JSON.parse(localStorage.getItem('alnada-favorites') || '[]'),
   modalProduct: null,
+  catalog: [],
+  categories: [],
+  content: {},
 };
 
 const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
-const money = (value) => `${new Intl.NumberFormat('ar-SA').format(value)} ر.س`;
-const imageMap = {
-  'طقم لينن هادئ': 'https://alnada-a6eirdjj.manus.space/manus-storage/async-images/XuqnR6s4huHdPuEZdrz6ow/image-1.webp',
-  'فستان سُهاد': 'https://alnada-a6eirdjj.manus.space/manus-storage/async-images/XuqnR6s4huHdPuEZdrz6ow/image-2.webp',
-  'معطف غيمة': 'https://alnada-a6eirdjj.manus.space/manus-storage/async-images/XuqnR6s4huHdPuEZdrz6ow/image-3.webp',
-  'تنورة نُور': 'https://alnada-a6eirdjj.manus.space/manus-storage/async-images/XuqnR6s4huHdPuEZdrz6ow/image-4.webp',
-  'بليزر ليان': 'https://alnada-a6eirdjj.manus.space/manus-storage/async-images/XuqnR6s4huHdPuEZdrz6ow/image-5.webp',
-};
-const descriptions = {
-  'طقم لينن هادئ': 'قميص واسع وبنطلون مستقيم من لينن خفيف، مصمم ليتحرك مع يومكِ بسهولة وأناقة.',
-  'فستان سُهاد': 'فستان ساتان مطفي بقصة ميدي ناعمة، ينساب بخفة من الصباح إلى الموعد المسائي.',
-  'معطف غيمة': 'معطف صوف ناعم بقصة ملفوفة وحزام يحدد الخصر، لدفء أنيق لا يثقل إطلالتكِ.',
-  'تنورة نُور': 'تنورة بكسرات ناعمة وخصر عالٍ، قطعة مرنة تضيف حركة خفيفة لأي إطلالة.',
-  'بليزر ليان': 'بليزر مفصل بعناية، بقصة نظيفة وتفاصيل تمنحكِ حضوراً هادئاً وواثقاً.',
-};
+const money = (value) => `${new Intl.NumberFormat('ar-SA').format(Number(value || 0))} ر.س`;
+const escapeHtml = (value = '') => String(value).replace(/[&<>"']/g, (char) => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;' }[char]));
+const productByName = (name) => state.catalog.find((item) => item.name === name);
 
-function persist() {
-  localStorage.setItem('alnada-cart', JSON.stringify(state.cart));
-  localStorage.setItem('alnada-favorites', JSON.stringify(state.favorites));
-}
+function persist() { localStorage.setItem('alnada-cart', JSON.stringify(state.cart)); localStorage.setItem('alnada-favorites', JSON.stringify(state.favorites)); }
+function showToast(message) { const toast = $('[data-toast]'); toast.textContent = message; toast.classList.add('is-visible'); clearTimeout(showToast.timeout); showToast.timeout = setTimeout(() => toast.classList.remove('is-visible'), 2800); }
+function updateIndicators() { const cartCount = state.cart.reduce((sum, item) => sum + item.quantity, 0); const favoriteCount = state.favorites.length; $('.cart-count').textContent = cartCount; $('.favorite-count').textContent = favoriteCount; $('.cart-count').classList.toggle('visible', cartCount > 0); $('.favorite-count').classList.toggle('visible', favoriteCount > 0); $('.panel-count', $('[data-panel="cart"]')).textContent = `(${new Intl.NumberFormat('ar-SA').format(cartCount)})`; $('.favorites-panel-count').textContent = `(${new Intl.NumberFormat('ar-SA').format(favoriteCount)})`; }
+function renderCart() { const list = $('.cart-items'); const empty = $('.cart-empty'); const footer = $('.cart-footer'); list.innerHTML = ''; let total = 0; state.cart.forEach((item, index) => { total += item.price * item.quantity; const row = document.createElement('div'); row.className = 'cart-item'; row.innerHTML = `<img src="${escapeHtml(item.image || '')}" alt="${escapeHtml(item.name)}" /><div><h4>${escapeHtml(item.name)}</h4><p>الكمية: ${item.quantity}</p></div><div><strong>${money(item.price * item.quantity)}</strong><button class="remove-item" data-cart-index="${index}" aria-label="حذف ${escapeHtml(item.name)}">×</button></div>`; list.appendChild(row); }); empty.style.display = state.cart.length ? 'none' : 'block'; footer.style.display = state.cart.length ? 'flex' : 'none'; $('.cart-total').textContent = money(total); updateIndicators(); }
+function renderFavorites() { const list = $('.favorites-items'); const empty = $('.favorites-empty'); list.innerHTML = ''; state.favorites.forEach((name) => { const product = productByName(name); if (!product) return; const row = document.createElement('div'); row.className = 'favorite-item'; row.innerHTML = `<img src="${escapeHtml(product.image_url || '')}" alt="${escapeHtml(name)}" /><div><h4>${escapeHtml(name)}</h4><p>قطعة مختارة لكِ</p></div><strong>${money(product.price)}</strong>`; list.appendChild(row); }); empty.style.display = state.favorites.length ? 'none' : 'block'; updateIndicators(); }
+function syncFavoriteButtons() { $$('.favorite-toggle').forEach((button) => { const name = button.closest('.product-card')?.dataset.name; const active = state.favorites.includes(name); button.classList.toggle('is-favorite', active); button.setAttribute('aria-pressed', String(active)); }); }
+function addToCart(name, price) { const product = productByName(name); const existing = state.cart.find((item) => item.name === name); if (existing) existing.quantity += 1; else state.cart.push({ name, price: Number(price || product?.price || 0), quantity: 1, image: product?.image_url || '' }); persist(); renderCart(); showToast(`أضيفت «${name}» إلى حقيبتكِ`); }
+function toggleFavorite(button) { const name = button.closest('.product-card')?.dataset.name; if (!name) return; if (state.favorites.includes(name)) { state.favorites = state.favorites.filter((item) => item !== name); showToast(`أزيلت «${name}» من المفضلة`); } else { state.favorites.push(name); showToast(`حُفظت «${name}» في المفضلة`); } persist(); syncFavoriteButtons(); renderFavorites(); }
+function openPanel(name) { $$('.side-panel').forEach((panel) => panel.classList.toggle('is-open', panel.dataset.panel === name)); $('.overlay').classList.add('is-visible'); document.body.classList.add('panel-open'); if (name === 'cart') renderCart(); if (name === 'favorites') renderFavorites(); }
+function closePanels() { $$('.side-panel').forEach((panel) => panel.classList.remove('is-open')); $('.overlay').classList.remove('is-visible'); document.body.classList.remove('panel-open'); }
+function openModal(card) { const product = productByName(card.dataset.name); if (!product) return; state.modalProduct = product; $('[data-modal-image]').src = product.image_url || ''; $('[data-modal-image]').alt = product.name; $('[data-modal-title]').textContent = product.name; $('[data-modal-description]').textContent = product.description || 'قطعة صُممت لتمنح يومكِ مزيداً من الراحة والأناقة.'; $('[data-modal-price]').textContent = money(product.price); $('[data-modal]').classList.add('is-open'); document.body.classList.add('panel-open'); }
+function closeModal() { $('[data-modal]').classList.remove('is-open'); document.body.classList.remove('panel-open'); }
+function filterProducts(category) { $$('.filter-chip').forEach((chip) => chip.classList.toggle('active', chip.dataset.filter === category)); $$('.product-card').forEach((card) => { card.hidden = category !== 'الكل' && card.dataset.category !== category; }); }
+function handleSearch(query) { const normalized = query.trim().toLowerCase(); closePanels(); if (!normalized) return; const cards = $$('.product-card'); let count = 0; cards.forEach((card) => { const matches = card.textContent.toLowerCase().includes(normalized); card.hidden = !matches; if (matches) count += 1; }); document.querySelector('#new-arrivals').scrollIntoView({ behavior: 'smooth' }); showToast(count ? `وجدنا ${new Intl.NumberFormat('ar-SA').format(count)} قطع تناسب بحثكِ` : 'لم نجد هذه القطعة بعد، جربي كلمة أخرى'); if (!count) setTimeout(() => $$('.product-card').forEach((card) => { card.hidden = false; }), 2800); }
 
-function showToast(message) {
-  const toast = $('[data-toast]');
-  toast.textContent = message;
-  toast.classList.add('is-visible');
-  clearTimeout(showToast.timeout);
-  showToast.timeout = setTimeout(() => toast.classList.remove('is-visible'), 2800);
-}
+function productCard(product) { const badge = product.featured ? '<span class="product-badge soft">الأكثر طلباً</span>' : '<span class="product-badge">جديد</span>'; return `<article class="product-card" data-category="${escapeHtml(product.category_name || '')}" data-name="${escapeHtml(product.name)}"><div class="product-media">${badge}<button class="favorite-toggle" data-action="toggle-favorite" aria-label="أضيفي إلى المفضلة" aria-pressed="false"><svg viewBox="0 0 24 24"><path d="M20.8 8.8c0 5.3-8.8 10.2-8.8 10.2S3.2 14.1 3.2 8.8A4.8 4.8 0 0 1 12 6a4.8 4.8 0 0 1 8.8 2.8Z" /></svg></button><img src="${escapeHtml(product.image_url || '')}" alt="${escapeHtml(product.name)}" loading="lazy" /><button class="quick-view" data-action="quick-view">نظرة سريعة</button></div><div class="product-info"><div><h3>${escapeHtml(product.name)}</h3><p>${escapeHtml(product.description || '')}</p></div><div class="price">${product.compare_price ? `<del>${money(product.compare_price)}</del>` : ''}<strong>${money(product.price)}</strong></div></div><button class="add-to-cart" data-action="add-to-cart" data-product="${escapeHtml(product.name)}" data-price="${product.price}">أضيفي إلى السلة <span>＋</span></button></article>`; }
+function updateContent() { const c = state.content; if (!c) return; $('.announcement-bar p').textContent = c.announcement || ''; $('.hero-eyebrow').textContent = c.heroEyebrow || ''; $('.hero-content h1').innerHTML = `${escapeHtml(c.heroTitle || '')}<br /><em>${escapeHtml(c.heroTitleAccent || '')}</em>`; $('.hero-copy').textContent = c.heroCopy || ''; const video = $('.hero-media'); if (c.heroVideo && video.querySelector('source').getAttribute('src') !== c.heroVideo) { video.querySelector('source').src = c.heroVideo; video.load(); } $('.intro-kicker span:last-child').textContent = c.aboutKicker || ''; $('.intro-copy h2').innerHTML = `${escapeHtml(c.aboutTitle || '')}<br /><em>${escapeHtml(c.aboutTitleAccent || '')}</em>`; $('.intro-copy p').textContent = c.aboutText || ''; $('.campaign-copy .eyebrow').textContent = c.campaignEyebrow || ''; $('.campaign-copy h2').innerHTML = `${escapeHtml(c.campaignTitle || '')}<br /><em>${escapeHtml(c.campaignTitleAccent || '')}</em>`; $('.campaign-copy p').textContent = c.campaignText || ''; $('.campaign-image img').src = c.campaignImage || $('.campaign-image img').src; $('.newsletter-section .eyebrow').textContent = c.newsletterEyebrow || ''; $('.newsletter-inner h2').innerHTML = `${escapeHtml(c.newsletterTitle || '')}<br /><em>${escapeHtml(c.newsletterTitleAccent || '')}</em>`; $('.newsletter-form label').textContent = c.newsletterText || ''; $('.footer-contact a[href^="mailto:"]').textContent = c.contactEmail || ''; $('.footer-contact a[href^="mailto:"]').href = `mailto:${c.contactEmail || ''}`; $('.footer-contact a[href^="tel:"]').textContent = c.contactPhone || ''; $('.footer-contact a[href^="tel:"]').href = `tel:${c.contactPhone || ''}`; $('.footer-contact p').textContent = c.contactAddress || ''; const social = $$('.social-links a'); if (social[0]) social[0].href = c.instagram || '#contact'; if (social[1]) social[1].href = c.tiktok || '#contact'; if (social[2]) social[2].href = c.pinterest || '#contact'; }
+function updateCollections() { const grid = $('.collection-grid'); if (!grid || !state.categories.length) return; grid.innerHTML = state.categories.slice(0, 5).map((c, index) => `<a class="collection-card ${index === 0 ? 'collection-card-tall' : ''}" href="#new-arrivals" data-filter="${escapeHtml(c.name)}"><img src="${escapeHtml(c.image_url || '')}" alt="${escapeHtml(c.name)}" loading="lazy" /><span class="collection-overlay"><strong>${escapeHtml(c.name)}</strong><small>اكتشفي المجموعة <b>←</b></small></span></a>`).join(''); }
+function updateProducts() { const grid = $('#product-grid'); if (!grid) return; grid.innerHTML = state.catalog.slice(0, 8).map(productCard).join(''); const controls = $('.product-controls'); if (controls) controls.innerHTML = `<button class="filter-chip active" data-filter="الكل">الكل</button>${state.categories.slice(0, 4).map((c) => `<button class="filter-chip" data-filter="${escapeHtml(c.name)}">${escapeHtml(c.name)}</button>`).join('')}`; }
+function updateBestSellers() { const featured = state.catalog.filter((p) => p.featured).slice(0, 4); if (!featured.length) return; const lead = featured[0]; $('.best-feature img').src = lead.image_url || ''; $('.best-feature h3').textContent = lead.name; $('.best-feature p').textContent = lead.description || ''; const leadButton = $('.best-feature [data-action="add-to-cart"]'); leadButton.dataset.product = lead.name; leadButton.dataset.price = lead.price; $('.best-list').innerHTML = featured.slice(1).map((p, index) => `<article class="best-row"><span class="best-index">0${index + 2}</span><img src="${escapeHtml(p.image_url || '')}" alt="${escapeHtml(p.name)}" loading="lazy" /><div><h3>${escapeHtml(p.name)}</h3><p>${escapeHtml(p.description || '')}</p></div><strong>${money(p.price)}</strong><button class="circle-arrow" data-action="add-to-cart" data-product="${escapeHtml(p.name)}" data-price="${p.price}" aria-label="أضيفي ${escapeHtml(p.name)} إلى السلة">←</button></article>`).join(''); }
+async function hydratePublic() { try { const response = await fetch('/api/public/site'); if (!response.ok) return; const data = await response.json(); state.content = data.content || {}; state.catalog = data.products || []; state.categories = data.categories || []; updateContent(); updateCollections(); updateProducts(); updateBestSellers(); syncFavoriteButtons(); } catch { /* preserve the editorial fallback when the API is unavailable */ } }
 
-function updateIndicators() {
-  const cartCount = state.cart.reduce((sum, item) => sum + item.quantity, 0);
-  const favoriteCount = state.favorites.length;
-  const cartBadge = $('.cart-count');
-  const favoriteBadge = $('.favorite-count');
-  cartBadge.textContent = cartCount;
-  favoriteBadge.textContent = favoriteCount;
-  cartBadge.classList.toggle('visible', cartCount > 0);
-  favoriteBadge.classList.toggle('visible', favoriteCount > 0);
-  $('.panel-count', $('[data-panel="cart"]')).textContent = `(${new Intl.NumberFormat('ar-SA').format(cartCount)})`;
-  $('.favorites-panel-count').textContent = `(${new Intl.NumberFormat('ar-SA').format(favoriteCount)})`;
-}
-
-function renderCart() {
-  const list = $('.cart-items');
-  const empty = $('.cart-empty');
-  const footer = $('.cart-footer');
-  list.innerHTML = '';
-  let total = 0;
-  state.cart.forEach((item, index) => {
-    total += item.price * item.quantity;
-    const row = document.createElement('div');
-    row.className = 'cart-item';
-    row.innerHTML = `<img src="${item.image}" alt="${item.name}" /><div><h4>${item.name}</h4><p>الكمية: ${item.quantity}</p></div><div><strong>${money(item.price * item.quantity)}</strong><button class="remove-item" data-cart-index="${index}" aria-label="حذف ${item.name}">×</button></div>`;
-    list.appendChild(row);
-  });
-  empty.style.display = state.cart.length ? 'none' : 'block';
-  footer.style.display = state.cart.length ? 'flex' : 'none';
-  $('.cart-total').textContent = money(total);
-  updateIndicators();
-}
-
-function renderFavorites() {
-  const list = $('.favorites-items');
-  const empty = $('.favorites-empty');
-  list.innerHTML = '';
-  state.favorites.forEach((name) => {
-    const row = document.createElement('div');
-    row.className = 'favorite-item';
-    row.innerHTML = `<img src="${imageMap[name]}" alt="${name}" /><div><h4>${name}</h4><p>قطعة مختارة لكِ</p></div><strong>${money({ 'طقم لينن هادئ': 290, 'فستان سُهاد': 345, 'معطف غيمة': 420, 'تنورة نُور': 265, 'بليزر ليان': 380 }[name] || 290)}</strong>`;
-    list.appendChild(row);
-  });
-  empty.style.display = state.favorites.length ? 'none' : 'block';
-  updateIndicators();
-}
-
-function syncFavoriteButtons() {
-  $$('.favorite-toggle').forEach((button) => {
-    const name = button.closest('.product-card')?.querySelector('h3')?.textContent;
-    const active = state.favorites.includes(name);
-    button.classList.toggle('is-favorite', active);
-    button.setAttribute('aria-pressed', String(active));
-  });
-}
-
-function addToCart(name, price) {
-  const existing = state.cart.find((item) => item.name === name);
-  if (existing) existing.quantity += 1;
-  else state.cart.push({ name, price: Number(price), quantity: 1, image: imageMap[name] });
-  persist();
-  renderCart();
-  showToast(`أضيفت «${name}» إلى حقيبتكِ`);
-}
-
-function toggleFavorite(button) {
-  const name = button.closest('.product-card')?.querySelector('h3')?.textContent;
-  if (!name) return;
-  if (state.favorites.includes(name)) {
-    state.favorites = state.favorites.filter((item) => item !== name);
-    showToast(`أزيلت «${name}» من المفضلة`);
-  } else {
-    state.favorites.push(name);
-    showToast(`حُفظت «${name}» في المفضلة`);
-  }
-  persist();
-  syncFavoriteButtons();
-  renderFavorites();
-}
-
-function openPanel(name) {
-  $$('.side-panel').forEach((panel) => panel.classList.toggle('is-open', panel.dataset.panel === name));
-  $('.overlay').classList.add('is-visible');
-  document.body.classList.add('panel-open');
-  if (name === 'cart') renderCart();
-  if (name === 'favorites') renderFavorites();
-}
-
-function closePanels() {
-  $$('.side-panel').forEach((panel) => panel.classList.remove('is-open'));
-  $('.overlay').classList.remove('is-visible');
-  document.body.classList.remove('panel-open');
-}
-
-function openModal(card) {
-  const title = card.querySelector('h3').textContent;
-  const price = card.querySelector('.price strong').textContent;
-  state.modalProduct = { name: title, price: Number(card.querySelector('[data-price]')?.dataset.price || 290), image: card.querySelector('.product-media img').src };
-  $('[data-modal-image]').src = state.modalProduct.image;
-  $('[data-modal-image]').alt = title;
-  $('[data-modal-title]').textContent = title;
-  $('[data-modal-description]').textContent = descriptions[title] || 'قطعة صُممت لتمنح يومكِ مزيداً من الراحة والأناقة.';
-  $('[data-modal-price]').textContent = price;
-  $('[data-modal]').classList.add('is-open');
-  document.body.classList.add('panel-open');
-}
-
-function closeModal() {
-  $('[data-modal]').classList.remove('is-open');
-  document.body.classList.remove('panel-open');
-}
-
-function filterProducts(category) {
-  $$('.filter-chip').forEach((chip) => chip.classList.toggle('active', chip.dataset.filter === category));
-  $$('.product-card').forEach((card) => {
-    card.hidden = category !== 'الكل' && card.dataset.category !== category;
-  });
-}
-
-function handleSearch(query) {
-  const normalized = query.trim().toLowerCase();
-  closePanels();
-  if (!normalized) return;
-  const cards = $$('.product-card');
-  let count = 0;
-  cards.forEach((card) => {
-    const matches = card.textContent.toLowerCase().includes(normalized);
-    card.hidden = !matches;
-    if (matches) count += 1;
-  });
-  document.querySelector('#new-arrivals').scrollIntoView({ behavior: 'smooth' });
-  showToast(count ? `وجدنا ${new Intl.NumberFormat('ar-SA').format(count)} قطع تناسب بحثكِ` : 'لم نجد هذه القطعة بعد، جربي كلمة أخرى');
-  if (!count) setTimeout(() => $$('.product-card').forEach((card) => { card.hidden = false; }), 2800);
-}
-
-document.addEventListener('click', (event) => {
-  const trigger = event.target.closest('[data-action]');
-  if (!trigger) return;
-  const action = trigger.dataset.action;
-  if (action === 'toggle-menu') $('.mobile-nav').classList.toggle('is-open');
-  if (action === 'open-search') openPanel('search');
-  if (action === 'open-cart') openPanel('cart');
-  if (action === 'open-favorites') openPanel('favorites');
-  if (action === 'close-panels') closePanels();
-  if (action === 'close-modal') closeModal();
-  if (action === 'toggle-favorite') toggleFavorite(trigger);
-  if (action === 'add-to-cart') addToCart(trigger.dataset.product, trigger.dataset.price);
-  if (action === 'quick-view') openModal(trigger.closest('.product-card'));
-  if (action === 'checkout') showToast('الدفع متاح قريباً — شكراً لاختياركِ الندى');
-  if (action === 'modal-add' && state.modalProduct) {
-    addToCart(state.modalProduct.name, state.modalProduct.price);
-    closeModal();
-  }
-  if (trigger.dataset.filter) {
-    filterProducts(trigger.dataset.filter);
-    document.querySelector('#new-arrivals').scrollIntoView({ behavior: 'smooth', block: 'start' });
-  }
-});
-
-document.addEventListener('click', (event) => {
-  const removeButton = event.target.closest('[data-cart-index]');
-  if (!removeButton) return;
-  state.cart.splice(Number(removeButton.dataset.cartIndex), 1);
-  persist();
-  renderCart();
-  showToast('أزيلت القطعة من حقيبتكِ');
-});
-
-$('.overlay').addEventListener('click', closePanels);
-$('[data-modal]').addEventListener('click', (event) => { if (event.target === $('[data-modal]')) closeModal(); });
-
-$('[data-action="search"]').addEventListener('submit', (event) => {
-  event.preventDefault();
-  handleSearch($('[data-action="search"] input').value);
-});
-
-$('[data-action="newsletter"]').addEventListener('submit', (event) => {
-  event.preventDefault();
-  const input = $('#email');
-  if (!input.value) return;
-  input.value = '';
-  showToast('أهلاً بكِ في رسائل الندى');
-});
-
+document.addEventListener('click', (event) => { const trigger = event.target.closest('[data-action]'); if (!trigger) return; const action = trigger.dataset.action; if (action === 'toggle-menu') $('.mobile-nav').classList.toggle('is-open'); if (action === 'open-search') openPanel('search'); if (action === 'open-cart') openPanel('cart'); if (action === 'open-favorites') openPanel('favorites'); if (action === 'close-panels') closePanels(); if (action === 'close-modal') closeModal(); if (action === 'toggle-favorite') toggleFavorite(trigger); if (action === 'add-to-cart') addToCart(trigger.dataset.product, trigger.dataset.price); if (action === 'quick-view') openModal(trigger.closest('.product-card')); if (action === 'checkout') showToast('أضيفي بيانات التواصل لإتمام الطلب — شكراً لاختياركِ الندى'); if (action === 'modal-add' && state.modalProduct) { addToCart(state.modalProduct.name, state.modalProduct.price); closeModal(); } if (trigger.dataset.filter) { filterProducts(trigger.dataset.filter); document.querySelector('#new-arrivals').scrollIntoView({ behavior: 'smooth', block: 'start' }); } });
+document.addEventListener('click', (event) => { const removeButton = event.target.closest('[data-cart-index]'); if (!removeButton) return; state.cart.splice(Number(removeButton.dataset.cartIndex), 1); persist(); renderCart(); showToast('أزيلت القطعة من حقيبتكِ'); });
+$('.overlay').addEventListener('click', closePanels); $('[data-modal]').addEventListener('click', (event) => { if (event.target === $('[data-modal]')) closeModal(); });
+$('[data-action="search"]').addEventListener('submit', (event) => { event.preventDefault(); handleSearch($('[data-action="search"] input').value); });
+$('[data-action="newsletter"]').addEventListener('submit', (event) => { event.preventDefault(); const input = $('#email'); if (!input.value) return; input.value = ''; showToast('أهلاً بكِ في رسائل الندى'); });
 $$('.mobile-nav a').forEach((link) => link.addEventListener('click', () => $('.mobile-nav').classList.remove('is-open')));
-
-renderCart();
-renderFavorites();
-syncFavoriteButtons();
+renderCart(); renderFavorites(); syncFavoriteButtons(); hydratePublic();
