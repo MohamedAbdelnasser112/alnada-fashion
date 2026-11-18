@@ -1,22 +1,25 @@
-# الندى | Al Nada — Product Details Extension Outcomes
+# الندى | Al Nada — Shopping Cart Extension Outcomes
 
-## Product detail route and gallery
-When the customer clicks a product image or name, open the canonical `/product/:id` page without losing the current Al Nada design. The page must show multiple product images with next/previous or thumbnail navigation, name, description, current price, discount price when present, stock state, available colors, available sizes, quantity selector and a responsive RTL layout.
+## Quick add and persistent cart
+Add a small elegant cart icon beside every product without replacing the existing product-card design. Clicking it adds the product immediately without opening the detail page or requesting color/size, shows an Arabic success message, updates the cart counter automatically, merges repeated product additions safely, and preserves cart contents in localStorage while navigating between pages.
 
-## Product choices and validation
-Render colors as real configured color swatches/blocks and sizes as available S/M/L/XL-style buttons. Each product manages its own combinations and stock. The customer cannot order before choosing a required color or size. Unavailable color/size combinations and out-of-stock selections show an Arabic inline message, and quantity cannot exceed the selected stock.
+## Cart drawer and line controls
+When opened, the cart displays every product image, name, unit price, quantity, line total and grand total. The customer can increase or decrease quantities, remove a line, and see totals update immediately on desktop and mobile RTL layouts.
 
-## Direct order handoff
-The detail-page `اطلبي الآن` button opens the existing order and delivery system with product name, selected color, selected size, quantity, unit price and canonical product link already present. The customer is not asked to enter those product details again. Existing university/external delivery, pickup dates, cash/prepaid payment, transfer proof and WhatsApp behavior remain intact.
+## Variant selection at checkout
+Do not request color or size during quick add. At checkout, request only the color and size options that actually exist for each cart product, allow selection per line, show unavailable combinations and stock messages, cap quantity by live stock, and block submission until each required selection is complete.
 
-## Admin product detail management
-Admins can add, edit and delete colors and sizes per product, define each color/size combination's stock and active state, upload/replace/reorder/remove multiple product images, update description/prices/discounts and control visibility. All changes persist in the managed database/storage and appear on the public site without code edits.
+## One multi-product order
+After cart choices, continue into the existing order flow once for the entire cart: customer name, phone, university/external delivery, university or address, pickup date and cash/prepaid payment via Digital Wallet or InstaPay. Save one order in the database before opening WhatsApp. The order snapshot must contain every product, URL, selected color, selected size, quantity, unit price, line totals, final total, customer, delivery and payment data. The order remains saved even if WhatsApp is not sent.
 
-## University logo correction and management
-Fix the Mansoura National University logo so it renders in university-selection cards and admin lists. For every university, allow either an uploaded image with pre-save preview, replace and clear controls, or an image URL with validation, preview, edit and clear controls. Persist the selected logo reference durably and keep the fallback monogram when a remote asset is unavailable.
+## Admin cart controls and order review
+Add admin settings to independently enable/disable quick add and show/hide cart icons. Preserve the existing admin order list and detail review, making multi-product line choices, quantities, stock context and totals visible.
 
 ## Compatibility and delivery
-Preserve the current premium feminine Al Nada visual identity, Arabic RTL behavior, mobile/desktop responsiveness, secure admin login, orders/payments/delivery/WhatsApp flow and existing public/admin routes. Keep durable images out of Git, use managed storage paths, run additive migrations only, and do not break existing legacy products that have no variant rows.
+Preserve the existing premium feminine Al Nada identity, Arabic RTL behavior, responsive behavior, product detail route, variants, inventory validation, university delivery, external delivery, payment review, transfer proof, WhatsApp behavior, secure admin login and durable storage. Use additive changes only and run the production build before checkpointing.
+
+## Review hardening
+The final review fixes are included: detail-page ordering preserves existing quick-cart lines; quick-add and drawer quantities are capped by current stock; order creation uses a row-locking transaction with atomic stock decrement and rollback; malformed localStorage cannot block storefront boot; and admin customer WhatsApp links use normalized international numbers.
 
 ## Previously delivered outcomes retained
-The published admin system, products/categories/content management, order settings, four-university delivery configuration, payment review and hero/explainer media controls remain part of this release.
+Product detail pages, multiple galleries, color/size variants, per-variant stock, university logo management, public storefront content management and the server-backed admin dashboard remain part of this release.

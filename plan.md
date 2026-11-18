@@ -1,26 +1,35 @@
-# الندى | Al Nada — Product Details & Variant Extension
+# الندى | Al Nada — Implementation Plan
 
-## Scope
-Extend the existing published server-backed Al Nada storefront without changing its quiet-luxury Arabic RTL identity. Product images and names open a dedicated detail route. The detail experience reads the selected product from the live catalog, supports gallery navigation, color swatches, size buttons, quantity, stock messaging and a direct `اطلبي الآن` path into the existing delivery/payment/WhatsApp order flow.
+## Product and brand direction
+Preserve the existing quiet-luxury Al Nada identity: feminine editorial fashion, cream and blush surfaces, beige neutrals, dark brown typography, Arabic RTL layout, restrained rounded cards, generous whitespace and small purposeful motion. Product cards remain recognizable; new cart controls are subtle outline icons rather than a visual redesign.
 
-## Data architecture
-Keep products and orders in the existing managed MySQL database. Add additive product-media and product-variant tables: `product_images` stores ordered durable storage URLs and alt text; `product_variants` stores one color/size combination, its display color value, stock and active state. Preserve existing product `sizes_json` and `colors_json` as fallback for legacy products, but make variants the source of truth when present. Order item snapshots will include selected color, size, quantity, unit price and product URL so historical orders do not change when catalog data changes.
+## Existing application architecture
+The public storefront is served from `/`, canonical product details from `/product/:id`, the admin login from `/admin/login`, and the protected dashboard from `/admin`. Vite builds the public and admin entries into `dist`; the Express server serves that build and owns the public catalog APIs, order APIs, admin APIs, managed MySQL access, sessions and durable media paths. `server/db.mjs` owns additive schema/seed behavior, `server/server.mjs` owns HTTP validation and transactions, `src/main.js` owns public RTL interactions, and `src/admin/main.js` owns the dashboard.
 
-Store uploads through the trusted server upload endpoint and persist only stable `/manus-storage/...` paths or validated external URLs. For deletion, soft-delete/hide media records and clear the product/university reference; runtime storage has no physical delete contract, so the UI will describe this as removing from the live catalog while preserving durable historical references.
+## Shopping-cart data flow
+Use localStorage only for the visitor's pending cart and favorites; the database remains the source of truth for products, variants, stock and saved orders. A cart line carries product id, name, image, canonical product URL, unit price snapshot, quantity and optional color/size. Quick add merges by product id without opening details. A detail-page order merges by product id plus selected color/size so it never replaces existing cart lines. The cart is rehydrated on every public page and cleared only after the server confirms the order was saved.
 
-## Public experience
-Use `/product/:id` as the canonical product-detail page and preserve the existing single-entry server fallback. Product cards make both image and title links. The page keeps the current warm paper/blush palette: editorial gallery on one side, calm purchase panel on the other, larger Arabic type, hairline dividers, blush selected states and mobile stacking. Color swatches use actual configured color values, sizes become buttons, quantity is bounded by selected stock, and unavailable combinations show an inline Arabic message. The direct order action carries product name, canonical relative link, selected color, selected size, quantity and price into the current order sheet without asking the customer to re-enter them.
+## Quick add and cart drawer
+Every dynamic product card receives a small cart icon beside its favorite action. The icon is controlled by the existing order-settings API: `quickCartEnabled` independently hides quick-add controls, while `cartIconVisible` independently controls the header bag. The drawer renders image, name, unit price, quantity, line total and grand total; it supports increase, decrease and remove actions and persists each change. Quick add and drawer increment use a safe stock cap: selected variant lines use exact live stock, unselected quick-add lines use the highest active variant stock, and no-variant products use product stock.
 
-## Admin experience
-Extend product create/edit with variant rows, independent stock per color/size, active state, multiple image upload/URL rows, ordering, preview and remove controls. Existing visibility, price, discount, description and category controls remain. The university editor gets two explicit logo paths: upload with preview/replace/remove and URL with validation, preview and clear. The Mansoura National University seed logo will be corrected to a stable official asset/fallback and rendered consistently in public cards and the admin list.
+## Multi-product checkout
+Checkout first renders one choice card per cart line. It shows only colors and sizes that exist for that product, pre-fills a single available choice, shows the matched stock, caps quantity, and blocks submission when a required choice is missing or unavailable. The existing delivery/payment step follows once for the entire cart: customer name, phone/email, university or external delivery, university/address, allowed delivery date, cash or prepaid Digital Wallet/InstaPay, optional transfer proof and WhatsApp handoff.
 
-## Safety and compatibility
-Validate variant combinations and stock server-side before accepting an order. Keep the existing payment, delivery, university, proof-upload and WhatsApp flow intact. Additive migrations must preserve existing products, orders, media and admin data. Use Arabic RTL and responsive behavior at desktop and mobile widths. Keep `/admin`, `/admin/login`, `/`, and `/product/:id` in the route manifest.
+## Server order integrity
+`POST /api/public/orders` recomputes product prices and line totals from the database, validates every product, active variant and quantity, and saves one order snapshot containing all line choices, quantities, URLs and totals. It uses a MySQL transaction with row locks, atomically decrements the selected variant or product stock, inserts the order, and rolls back on any validation, stock or insert failure. The WhatsApp URL is generated only after commit and contains every product line, choices, quantities, line totals, delivery, payment and final total. Admin order detail shows the same information and uses normalized customer phone numbers for WhatsApp links.
+
+## Admin controls
+Add the two cart toggles to the existing order-settings form. Keep the product variant editor as the inventory source. The order list and detail modal support multi-product review, including colors, sizes, quantities, line totals, final total, payment review and delivery context. The secure admin session and all existing content, product, university, media and category management remain unchanged.
+
+## Reliability and validation
+LocalStorage parsing is defensive so stale values cannot block storefront boot. The route manifest remains synchronized with `/`, `/product/:id`, `/admin` and `/admin/login`. Build and syntax checks run after the patch; API smoke checks cover cart settings, protected admin access, invalid variants, over-stock rejection, rollback preservation and rendered quick-cart hooks. No successful test order is created against the shared managed database.
 
 ## Project structure
-- `server/db.mjs`: additive tables, seed/fallback data and migrations.
-- `server/server.mjs`: product detail, media/variant CRUD, university logo validation and variant-aware order validation.
-- `src/main.js`: live catalog links, product detail renderer, selection state and order handoff.
-- `src/styles.css`: detail/gallery/variant styling in the existing Al Nada system.
-- `src/admin/main.js` and `src/admin/styles.css`: product variants/media and university logo controls.
-- `public/manus-routes.json`: public route declarations.
+- `src/main.js`: cart state, product-card quick add, stock caps, drawer controls, variant checkout and order handoff.
+- `src/styles.css`: subtle cart icon, drawer controls and responsive checkout-choice styles.
+- `server/server.mjs`: public cart-aware order normalization, transaction, stock decrement and WhatsApp details.
+- `server/db.mjs`: persisted cart-setting defaults and existing catalog schema.
+- `src/admin/main.js`: cart settings and multi-line order review.
+- `src/admin/styles.css`: admin toggle and order-detail presentation.
+- `index.html` and `public/manus-routes.json`: cart header hook and synchronized page routes.
+- `TODO.md`: explicit acceptance outcomes for this release and retained prior features.

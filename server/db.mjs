@@ -166,6 +166,8 @@ const defaultContent = {
 const defaultOrderSettings = {
   universityDeliveryEnabled: true,
   externalDeliveryEnabled: true,
+  quickCartEnabled: true,
+  cartIconVisible: true,
   whatsappNumber: '01008814332',
   digitalWallet: '01008814332',
   instapay: '01061081756',

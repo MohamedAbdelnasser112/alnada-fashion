@@ -76,46 +76,73 @@ app.get('/api/public/order-config', async (req, res, next) => {
 });
 
 app.post('/api/public/orders', async (req, res, next) => {
+  const fail = (status, code, message) => Object.assign(new Error(message), { status, code });
+  let connection;
   try {
     const { customer = {}, items = [], details = {} } = req.body || {};
-    if (!customer.name || !customer.phone || !Array.isArray(items) || !items.length) return res.status(400).json({ error: 'INVALID_ORDER', message: 'يرجى إكمال الاسم ورقم الهاتف وإضافة منتج واحد على الأقل.' });
-    if (!['university', 'external'].includes(details.deliveryMethod)) return res.status(400).json({ error: 'INVALID_DELIVERY', message: 'اختاري طريقة التوصيل.' });
-    if (!['cash', 'prepaid'].includes(details.paymentMethod)) return res.status(400).json({ error: 'INVALID_PAYMENT', message: 'اختاري وسيلة الدفع.' });
-    const db = getDb();
-    const [settingRows] = await db.execute('SELECT content_json FROM site_content WHERE content_key = "order_settings"');
+    if (!customer.name || !customer.phone || !Array.isArray(items) || !items.length) throw fail(400, 'INVALID_ORDER', 'يرجى إكمال الاسم ورقم الهاتف وإضافة منتج واحد على الأقل.');
+    if (!['university', 'external'].includes(details.deliveryMethod)) throw fail(400, 'INVALID_DELIVERY', 'اختاري طريقة التوصيل.');
+    if (!['cash', 'prepaid'].includes(details.paymentMethod)) throw fail(400, 'INVALID_PAYMENT', 'اختاري وسيلة الدفع.');
+    const pool = getDb();
+    connection = await pool.getConnection();
+    await connection.beginTransaction();
+    const [settingRows] = await connection.execute('SELECT content_json FROM site_content WHERE content_key = "order_settings"');
     const settings = { ...defaultOrderSettings, ...parseJson(settingRows[0]?.content_json, {}) };
-    if (details.deliveryMethod === 'university' && !settings.universityDeliveryEnabled) return res.status(400).json({ error: 'DELIVERY_DISABLED', message: 'التوصيل الجامعي غير متاح حالياً.' });
-    if (details.deliveryMethod === 'external' && !settings.externalDeliveryEnabled) return res.status(400).json({ error: 'DELIVERY_DISABLED', message: 'التوصيل خارج الجامعة غير متاح حالياً.' });
+    if (details.deliveryMethod === 'university' && !settings.universityDeliveryEnabled) throw fail(400, 'DELIVERY_DISABLED', 'التوصيل الجامعي غير متاح حالياً.');
+    if (details.deliveryMethod === 'external' && !settings.externalDeliveryEnabled) throw fail(400, 'DELIVERY_DISABLED', 'التوصيل خارج الجامعة غير متاح حالياً.');
     let selectedUniversity = null;
     if (details.deliveryMethod === 'university') {
-      if (!details.universityId || !details.deliveryDate) return res.status(400).json({ error: 'INVALID_PICKUP', message: 'اختاري الجامعة وموعد الاستلام.' });
-      const [universityRows] = await db.execute('SELECT id, name, active, coming_soon FROM universities WHERE id = ?', [details.universityId]);
+      if (!details.universityId || !details.deliveryDate) throw fail(400, 'INVALID_PICKUP', 'اختاري الجامعة وموعد الاستلام.');
+      const [universityRows] = await connection.execute('SELECT id, name, active, coming_soon FROM universities WHERE id = ? FOR UPDATE', [details.universityId]);
       selectedUniversity = universityRows[0];
-      if (!selectedUniversity || !selectedUniversity.active || selectedUniversity.coming_soon) return res.status(400).json({ error: 'INVALID_UNIVERSITY', message: 'هذه الجامعة غير متاحة للاختيار حالياً.' });
-      if (!(settings.deliveryDays || []).some((day) => day.date === details.deliveryDate)) return res.status(400).json({ error: 'INVALID_PICKUP_DATE', message: 'موعد الاستلام غير متاح.' });
+      if (!selectedUniversity || !selectedUniversity.active || selectedUniversity.coming_soon) throw fail(400, 'INVALID_UNIVERSITY', 'هذه الجامعة غير متاحة للاختيار حالياً.');
+      if (!(settings.deliveryDays || []).some((day) => day.date === details.deliveryDate)) throw fail(400, 'INVALID_PICKUP_DATE', 'موعد الاستلام غير متاح.');
     }
-    if (details.deliveryMethod === 'external' && !details.address) return res.status(400).json({ error: 'INVALID_ADDRESS', message: 'أضيفي العنوان بالتفصيل.' });
+    if (details.deliveryMethod === 'external' && !details.address) throw fail(400, 'INVALID_ADDRESS', 'أضيفي العنوان بالتفصيل.');
     const normalizedItems = [];
     for (const item of items) {
-      const quantity = Math.max(1, Math.floor(Number(item.quantity || 1)));
+      const quantity = Math.floor(Number(item.quantity || 1));
+      if (!Number.isFinite(quantity) || quantity < 1 || quantity > 999) throw fail(400, 'INVALID_QUANTITY', 'الكمية المطلوبة غير صحيحة.');
       if (item.productId) {
-        const [productRows] = await db.execute('SELECT id, name, price, image_url FROM products WHERE id = ? AND visible = 1', [item.productId]);
-        const product = productRows[0]; if (!product) return res.status(400).json({ error: 'INVALID_PRODUCT', message: 'أحد المنتجات لم يعد متاحاً.' });
-        const [variantRows] = await db.execute('SELECT id, color_name, size, stock, active FROM product_variants WHERE product_id = ? AND color_name = ? AND size = ? LIMIT 1', [item.productId, item.color || '', item.size || '']);
-        if (!variantRows[0] || !variantRows[0].active) return res.status(400).json({ error: 'INVALID_VARIANT', message: 'اختيار اللون أو المقاس غير متاح.' });
-        if (Number(variantRows[0].stock) < quantity) return res.status(400).json({ error: 'OUT_OF_STOCK', message: 'الكمية المطلوبة غير متاحة حالياً.' });
-        normalizedItems.push({ productId: product.id, name: product.name, url: item.url || `/product/${product.id}`, image: item.image || product.image_url, color: variantRows[0].color_name, size: variantRows[0].size, quantity, price: Number(product.price) });
-      } else normalizedItems.push({ ...item, quantity });
+        const [productRows] = await connection.execute('SELECT id, name, price, stock, image_url FROM products WHERE id = ? AND visible = 1 FOR UPDATE', [item.productId]);
+        const product = productRows[0];
+        if (!product) throw fail(400, 'INVALID_PRODUCT', 'أحد المنتجات لم يعد متاحاً.');
+        const [variantRows] = await connection.execute('SELECT id, color_name, size, stock, active FROM product_variants WHERE product_id = ? ORDER BY id FOR UPDATE', [item.productId]);
+        const activeVariants = variantRows.filter((row) => row.active);
+        const hasVariants = variantRows.length > 0;
+        const requiresColor = activeVariants.some((row) => row.color_name);
+        const requiresSize = activeVariants.some((row) => row.size);
+        if (hasVariants && ((requiresColor && !item.color) || (requiresSize && !item.size))) throw fail(400, 'INVALID_VARIANT', 'اختاري اللون والمقاس المطلوبين قبل تأكيد الطلب.');
+        const variant = hasVariants ? activeVariants.find((row) => (!requiresColor || row.color_name === item.color) && (!requiresSize || row.size === item.size)) : null;
+        if (hasVariants && !variant) throw fail(400, 'INVALID_VARIANT', 'اختيار اللون أو المقاس غير متاح.');
+        const availableStock = hasVariants ? Number(variant.stock) : Number(product.stock || 0);
+        if (availableStock < quantity) throw fail(400, 'OUT_OF_STOCK', 'الكمية المطلوبة غير متاحة حالياً.');
+        if (hasVariants) {
+          const [updated] = await connection.execute('UPDATE product_variants SET stock = stock - ? WHERE id = ? AND active = 1 AND stock >= ?', [quantity, variant.id, quantity]);
+          if (!updated.affectedRows) throw fail(409, 'OUT_OF_STOCK', 'تغير المخزون للتو. راجعي الكمية ثم حاولي مرة أخرى.');
+        } else {
+          const [updated] = await connection.execute('UPDATE products SET stock = stock - ? WHERE id = ? AND visible = 1 AND stock >= ?', [quantity, product.id, quantity]);
+          if (!updated.affectedRows) throw fail(409, 'OUT_OF_STOCK', 'تغير المخزون للتو. راجعي الكمية ثم حاولي مرة أخرى.');
+        }
+        normalizedItems.push({ productId: product.id, name: product.name, url: item.url || `/product/${product.id}`, image: item.image || product.image_url, color: hasVariants ? variant.color_name : '', size: hasVariants ? variant.size : '', quantity, price: Number(product.price), lineTotal: Number(product.price) * quantity });
+      } else normalizedItems.push({ ...item, quantity, lineTotal: Number(item.price || 0) * quantity });
     }
     const total = normalizedItems.reduce((sum, item) => sum + Number(item.price || 0) * Number(item.quantity || 1), 0);
     const orderNumber = `#AN-${Math.floor(1000 + Math.random() * 8999)}`;
     const paymentStatus = details.paymentMethod === 'prepaid' ? 'pending_review' : 'cash_on_delivery';
     const meta = { ...details, universityName: selectedUniversity?.name || '', whatsappNumber: settings.whatsappNumber, orderMessage: settings.orderMessage, digitalWallet: settings.digitalWallet, instapay: settings.instapay, paymentStatus, transferProof: Boolean(details.transferProof), transferProofData: String(details.transferProof || '').slice(0, 1800000), submittedAt: new Date().toISOString() };
-    await db.execute('INSERT INTO orders (order_number, customer_name, customer_email, customer_phone, total, status, items_json, order_meta_json) VALUES (?, ?, ?, ?, ?, "new", ?, ?)', [orderNumber, customer.name, customer.email || null, customer.phone, total, JSON.stringify(normalizedItems), JSON.stringify(meta)]);
+    await connection.execute('INSERT INTO orders (order_number, customer_name, customer_email, customer_phone, total, status, items_json, order_meta_json) VALUES (?, ?, ?, ?, ?, "new", ?, ?)', [orderNumber, customer.name, customer.email || null, customer.phone, total, JSON.stringify(normalizedItems), JSON.stringify(meta)]);
+    await connection.commit();
+    connection.release(); connection = null;
     const number = normalizeWhatsApp(settings.whatsappNumber || '01008814332');
-    const lines = [details.orderMessage || 'مرحباً، أود تأكيد طلبي من الندى.', `رقم الطلب: ${orderNumber}`, `الاسم: ${customer.name}`, `الهاتف: ${customer.phone}`, ...normalizedItems.map((item) => `المنتج: ${item.name} | الرابط: ${item.url || ''} | الكمية: ${item.quantity} | السعر: ${item.price} ر.س`), `التوصيل: ${details.deliveryMethod === 'university' ? 'جامعي' : 'خارج الجامعة'}`, details.universityName ? `الجامعة: ${details.universityName}` : `العنوان: ${details.address}`, details.deliveryDate ? `موعد الاستلام: ${details.deliveryDate}` : '', `الدفع: ${details.paymentMethod === 'prepaid' ? 'دفع مسبق — بانتظار مراجعة الإدارة' : 'نقداً عند الاستلام'}`].filter(Boolean);
+    const universityName = selectedUniversity?.name || details.universityName;
+    const lines = [details.orderMessage || 'مرحباً، أود تأكيد طلبي من الندى.', `رقم الطلب: ${orderNumber}`, `الاسم: ${customer.name}`, `الهاتف: ${customer.phone}`, 'تفاصيل المنتجات:', ...normalizedItems.map((item, index) => `${index + 1}. ${item.name} | اللون: ${item.color || 'غير مطلوب'} | المقاس: ${item.size || 'غير مطلوب'} | الكمية: ${item.quantity} | سعر القطعة: ${item.price} ر.س | الإجمالي: ${item.lineTotal} ر.س | الرابط: ${item.url || ''}`), `الإجمالي النهائي: ${total} ر.س`, `التوصيل: ${details.deliveryMethod === 'university' ? 'جامعي' : 'خارج الجامعة'}`, universityName ? `الجامعة: ${universityName}` : `العنوان: ${details.address}`, details.deliveryDate ? `موعد الاستلام: ${details.deliveryDate}` : '', `الدفع: ${details.paymentMethod === 'prepaid' ? 'دفع مسبق — بانتظار مراجعة الإدارة' : 'نقداً عند الاستلام'}`].filter(Boolean);
     res.status(201).json({ orderNumber, whatsappUrl: `https://wa.me/${number}?text=${encodeURIComponent(lines.join('\n'))}` });
-  } catch (error) { next(error); }
+  } catch (error) {
+    if (connection) { try { await connection.rollback(); } catch {} connection.release(); }
+    if (error.status) return res.status(error.status).json({ error: error.code, message: error.message });
+    next(error);
+  }
 });
 
 app.post('/api/admin/login', async (req, res, next) => {
