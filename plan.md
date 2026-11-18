@@ -1,44 +1,27 @@
-# الندى | Al Nada — Admin System Plan
+# الندى | Al Nada — Orders & Delivery Extension Plan
 
 ## Product scope
-Build a server-backed, Arabic RTL admin system separated from the public storefront:
-- `/admin/login`: branded admin sign-in with email/username and password.
-- `/admin`: authenticated dashboard for products, orders, categories, analytics and public content.
-- Public `/`: reads editable content and catalog data from the server APIs so admin changes appear without code edits.
+Extend the existing server-backed Arabic RTL Al Nada storefront and admin dashboard with a complete order flow. Preserve the current quiet-luxury brand identity while making `/admin` the control surface for delivery, university, payment, media and order settings.
 
 ## Architecture
-- **Server:** Node.js + Express serves the built Vite assets and JSON APIs.
-- **Persistence:** Manus managed MySQL, enabled through the project server/database capabilities. Tables cover admin users, sessions, products, categories, orders/order items, customers and site content.
-- **Authentication:** application-owned admin session with bcrypt password verification, opaque random session tokens hashed in the database, HttpOnly/Secure/SameSite=None cookie for embedded Preview compatibility, expiry and role checks. Admin credentials are supplied through protected project secrets, never committed to source.
-- **Frontend:** preserve the existing public fashion page while adding a data hydration layer. Add a separate Vite admin entry at `/admin` with reusable dashboard shell, charts, tables, filters, forms and mobile layout.
-- **Deployment:** container-backed server publication with a Dockerfile, health endpoint, and runtime route handling. The existing static build output is replaced by a server build contract.
+The Node.js + Express server continues to serve the Vite public and admin entries. Managed MySQL remains the source of truth. Existing orders gain a JSON metadata column for delivery method, university/address, delivery date, payment method/status, transfer-proof presence and WhatsApp details. A persisted `site_content` key stores order settings; a new `universities` table stores names, logo URLs, official source URLs, active state, order and `coming_soon` state.
+
+The public storefront reads `/api/public/order-config` for delivery settings, available days, universities and payment numbers. It submits validated orders to `/api/public/orders`, receives the saved order number and WhatsApp message URL, then opens WhatsApp after the database write succeeds. Admin APIs remain protected by the existing application session and expose CRUD for universities, order settings, media URLs and payment numbers.
 
 ## Admin capabilities
-- Overview: products, orders, sales, customers, recent orders, best sellers and sales trend visualization.
-- Products: create, edit, delete, visibility, featured state, category, sizes, colors, stock, prices, discount and image URL/upload surface.
-- Categories: create, edit, delete, visibility and image.
-- Orders: search/filter, view detail, update status, cancel and delete.
-- Content: edit homepage hero/headings, promotional banner, announcement, About, contact, social links and offers.
-- Public APIs: catalog and site settings endpoints consumed by the storefront.
+The dashboard adds an “إعدادات الطلبات” section for university CRUD, active/coming-soon switches, university and external delivery toggles, Digital Wallet/InstaPay/WhatsApp numbers, order copy, explainer-video URL/title/description and available pickup dates. Product and content forms retain their existing behavior; the hero/video URL can be changed and previewed from content management.
+
+The orders view adds delivery/payment metadata, payment confirmation state, search/filter, status changes, details view and WhatsApp contact links. Payment is never marked paid automatically; prepaid orders begin as `pending_review` until an administrator confirms them.
+
+## Public order experience
+“اطلبي الآن” opens a responsive RTL order sheet with university or outside-university delivery. University cards show official source-based logos where available, a fallback monogram when a source asset cannot load, and a disabled “COMING SOON” card for Horus. The customer chooses an available date, supplies name and phone, selects cash or prepaid payment, sees the correct payment number with copy action, and may attach a transfer proof for prepaid orders. Outside-university delivery collects the complete address. Missing/invalid data blocks submission.
 
 ## Design direction
-- **Movement:** Cairo quiet-luxury editorial dashboard — warm paper surfaces, blush accents and restrained dark ink.
-- **Core principles:** operational clarity, feminine restraint, one-glance hierarchy, confident whitespace.
-- **Color philosophy:** cream and off-white backgrounds keep dense management surfaces calm; blush indicates brand actions and selected states; dark ink anchors data and navigational trust.
-- **Layout paradigm:** persistent right sidebar with a roomy asymmetric workspace, stacked metric cards, wide data tables and contextual drawers rather than a generic centered grid.
-- **Signature elements:** blush active rail, hairline dividers, soft cream cards, Arabic micro-labels paired with compact English utility labels.
-- **Interaction:** safe, explicit actions with inline feedback, confirmation for destructive operations, optimistic-feeling but server-confirmed saves, and filter state preserved within each section.
-- **Animation:** subtle 160–220ms fades and upward lifts only for route entry, cards and drawers; no distracting looping motion in admin.
-- **Typography:** Cairo for Arabic UI and numbers with a compact neutral sans fallback for utility labels; strong page titles, quiet metadata and clear table density.
-- **Brand essence:** a calm operations atelier for a premium women’s fashion house. Personality: precise, warm, composed.
-- **Voice:** direct, polished and reassuring. Examples: “كل تفاصيل الندى في مكان واحد.” / “تم حفظ التغييرات وظهرت على المتجر.”
-- **Wordmark:** preserve the existing الندى mark and pair it with a small “ATELIER / ADMIN” utility label.
-- **Signature color:** muted blush `#b67a7a` used sparingly for active navigation and primary actions.
+Keep the current Al Nada warm paper, cream, blush and dark-ink system. Use larger, heavier dashboard type and slightly larger icons without changing the layout language. Order steps should feel like a calm checkout drawer: clear section labels, generous fields, university cards, subtle selected borders and one confident CTA.
 
 ## Project structure
-- `server/`: Express server, database connection/migrations, auth middleware, API routes and seed logic.
-- `src/`: public storefront source and data hydration.
-- `admin/`: separate admin HTML entry.
-- `src/admin/`: admin application JavaScript and CSS.
-- `public/`: durable static assets and route manifest.
-- `Dockerfile`: production build and server entrypoint.
+- `server/`: schema, seed defaults, order APIs, settings APIs, uploads and auth.
+- `src/main.js` + `src/styles.css`: public hydration and order sheet.
+- `src/admin/main.js` + `src/admin/styles.css`: admin order/settings CRUD and visual refinements.
+- `public/manus-routes.json`: current page routes.
+- `research.md`: verified university sources and logo decisions.

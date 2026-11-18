@@ -4,7 +4,7 @@ import crypto from 'node:crypto';
 import express from 'express';
 import multer from 'multer';
 import { authenticate, clearSessionCookie, currentAdmin, logout, requireAdmin, setSessionCookie } from './auth.mjs';
-import { defaultContent, getDb, initDatabase } from './db.mjs';
+import { defaultContent, defaultOrderSettings, getDb, initDatabase } from './db.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(__dirname, '..');
@@ -29,7 +29,8 @@ const parseJson = (value, fallback = []) => {
 const slugify = (value) => String(value || '').trim().toLowerCase().replace(/[^\u0600-\u06ff\w\s-]/g, '').replace(/\s+/g, '-').replace(/-+/g, '-') || `product-${Date.now()}`;
 const mapProduct = (row) => ({ ...row, price: Number(row.price), compare_price: row.compare_price == null ? null : Number(row.compare_price), stock: Number(row.stock), featured: Boolean(row.featured), visible: Boolean(row.visible), sizes: parseJson(row.sizes_json), colors: parseJson(row.colors_json) });
 const mapCategory = (row) => ({ ...row, visible: Boolean(row.visible) });
-const mapOrder = (row) => ({ ...row, total: Number(row.total), items: parseJson(row.items_json) });
+const mapOrder = (row) => ({ ...row, total: Number(row.total), items: parseJson(row.items_json), meta: parseJson(row.order_meta_json, {}) });
+const normalizeWhatsApp = (value) => { const digits = String(value || '').replace(/\D/g, ''); if (digits.startsWith('20')) return digits; if (digits.startsWith('0')) return `20${digits.slice(1)}`; return `20${digits}`; };
 const publicContent = async () => {
   const db = getDb();
   const [contentRows] = await db.execute('SELECT content_json FROM site_content WHERE content_key = "homepage"');
@@ -45,15 +46,43 @@ app.get('/api/public/site', async (req, res, next) => {
     res.json({ content: await publicContent(), products: products.map(mapProduct), categories: categories.map(mapCategory) });
   } catch (error) { next(error); }
 });
+app.get('/api/public/order-config', async (req, res, next) => {
+  try {
+    const db = getDb();
+    const [settingRows] = await db.execute('SELECT content_json FROM site_content WHERE content_key = "order_settings"');
+    const [universityRows] = await db.execute('SELECT id, name, logo_url, source_url, active, coming_soon, sort_order FROM universities WHERE active = 1 ORDER BY sort_order, name');
+    res.json({ settings: { ...defaultOrderSettings, ...parseJson(settingRows[0]?.content_json, {}) }, universities: universityRows.map((row) => ({ ...row, active: Boolean(row.active), coming_soon: Boolean(row.coming_soon) })) });
+  } catch (error) { next(error); }
+});
+
 app.post('/api/public/orders', async (req, res, next) => {
   try {
-    const { customer = {}, items = [] } = req.body || {};
-    if (!customer.name || !Array.isArray(items) || !items.length) return res.status(400).json({ error: 'INVALID_ORDER', message: 'بيانات الطلب غير مكتملة.' });
+    const { customer = {}, items = [], details = {} } = req.body || {};
+    if (!customer.name || !customer.phone || !Array.isArray(items) || !items.length) return res.status(400).json({ error: 'INVALID_ORDER', message: 'يرجى إكمال الاسم ورقم الهاتف وإضافة منتج واحد على الأقل.' });
+    if (!['university', 'external'].includes(details.deliveryMethod)) return res.status(400).json({ error: 'INVALID_DELIVERY', message: 'اختاري طريقة التوصيل.' });
+    if (!['cash', 'prepaid'].includes(details.paymentMethod)) return res.status(400).json({ error: 'INVALID_PAYMENT', message: 'اختاري وسيلة الدفع.' });
     const db = getDb();
+    const [settingRows] = await db.execute('SELECT content_json FROM site_content WHERE content_key = "order_settings"');
+    const settings = { ...defaultOrderSettings, ...parseJson(settingRows[0]?.content_json, {}) };
+    if (details.deliveryMethod === 'university' && !settings.universityDeliveryEnabled) return res.status(400).json({ error: 'DELIVERY_DISABLED', message: 'التوصيل الجامعي غير متاح حالياً.' });
+    if (details.deliveryMethod === 'external' && !settings.externalDeliveryEnabled) return res.status(400).json({ error: 'DELIVERY_DISABLED', message: 'التوصيل خارج الجامعة غير متاح حالياً.' });
+    let selectedUniversity = null;
+    if (details.deliveryMethod === 'university') {
+      if (!details.universityId || !details.deliveryDate) return res.status(400).json({ error: 'INVALID_PICKUP', message: 'اختاري الجامعة وموعد الاستلام.' });
+      const [universityRows] = await db.execute('SELECT id, name, active, coming_soon FROM universities WHERE id = ?', [details.universityId]);
+      selectedUniversity = universityRows[0];
+      if (!selectedUniversity || !selectedUniversity.active || selectedUniversity.coming_soon) return res.status(400).json({ error: 'INVALID_UNIVERSITY', message: 'هذه الجامعة غير متاحة للاختيار حالياً.' });
+      if (!(settings.deliveryDays || []).some((day) => day.date === details.deliveryDate)) return res.status(400).json({ error: 'INVALID_PICKUP_DATE', message: 'موعد الاستلام غير متاح.' });
+    }
+    if (details.deliveryMethod === 'external' && !details.address) return res.status(400).json({ error: 'INVALID_ADDRESS', message: 'أضيفي العنوان بالتفصيل.' });
     const total = items.reduce((sum, item) => sum + Number(item.price || 0) * Number(item.quantity || 1), 0);
     const orderNumber = `#AN-${Math.floor(1000 + Math.random() * 8999)}`;
-    await db.execute('INSERT INTO orders (order_number, customer_name, customer_email, customer_phone, total, status, items_json) VALUES (?, ?, ?, ?, ?, "new", ?)', [orderNumber, customer.name, customer.email || null, customer.phone || null, total, JSON.stringify(items)]);
-    res.status(201).json({ orderNumber });
+    const paymentStatus = details.paymentMethod === 'prepaid' ? 'pending_review' : 'cash_on_delivery';
+    const meta = { ...details, universityName: selectedUniversity?.name || '', whatsappNumber: settings.whatsappNumber, orderMessage: settings.orderMessage, digitalWallet: settings.digitalWallet, instapay: settings.instapay, paymentStatus, transferProof: Boolean(details.transferProof), transferProofData: String(details.transferProof || '').slice(0, 1800000), submittedAt: new Date().toISOString() };
+    await db.execute('INSERT INTO orders (order_number, customer_name, customer_email, customer_phone, total, status, items_json, order_meta_json) VALUES (?, ?, ?, ?, ?, "new", ?, ?)', [orderNumber, customer.name, customer.email || null, customer.phone, total, JSON.stringify(items), JSON.stringify(meta)]);
+    const number = normalizeWhatsApp(settings.whatsappNumber || '01008814332');
+    const lines = [details.orderMessage || 'مرحباً، أود تأكيد طلبي من الندى.', `رقم الطلب: ${orderNumber}`, `الاسم: ${customer.name}`, `الهاتف: ${customer.phone}`, ...items.map((item) => `المنتج: ${item.name} | الرابط: ${item.url || ''} | الكمية: ${item.quantity} | السعر: ${item.price} ر.س`), `التوصيل: ${details.deliveryMethod === 'university' ? 'جامعي' : 'خارج الجامعة'}`, details.universityName ? `الجامعة: ${details.universityName}` : `العنوان: ${details.address}`, details.deliveryDate ? `موعد الاستلام: ${details.deliveryDate}` : '', `الدفع: ${details.paymentMethod === 'prepaid' ? 'دفع مسبق — بانتظار مراجعة الإدارة' : 'نقداً عند الاستلام'}`].filter(Boolean);
+    res.status(201).json({ orderNumber, whatsappUrl: `https://wa.me/${number}?text=${encodeURIComponent(lines.join('\n'))}` });
   } catch (error) { next(error); }
 });
 
@@ -130,6 +159,14 @@ app.get('/api/admin/orders', async (req, res, next) => {
 app.get('/api/admin/orders/:id', async (req, res, next) => { try { const [rows] = await getDb().execute('SELECT * FROM orders WHERE id = ?', [req.params.id]); if (!rows[0]) return res.status(404).json({ error: 'NOT_FOUND' }); res.json({ order: mapOrder(rows[0]) }); } catch (error) { next(error); } });
 app.patch('/api/admin/orders/:id/status', async (req, res, next) => { try { await getDb().execute('UPDATE orders SET status=? WHERE id=?', [req.body?.status || 'new', req.params.id]); const [rows] = await getDb().execute('SELECT * FROM orders WHERE id = ?', [req.params.id]); res.json({ order: mapOrder(rows[0]) }); } catch (error) { next(error); } });
 app.delete('/api/admin/orders/:id', async (req, res, next) => { try { await getDb().execute('DELETE FROM orders WHERE id = ?', [req.params.id]); res.json({ ok: true }); } catch (error) { next(error); } });
+
+app.get('/api/admin/order-settings', async (req, res, next) => { try { const [rows] = await getDb().execute('SELECT content_json FROM site_content WHERE content_key = "order_settings"'); res.json({ settings: { ...defaultOrderSettings, ...parseJson(rows[0]?.content_json, {}) } }); } catch (error) { next(error); } });
+app.put('/api/admin/order-settings', async (req, res, next) => { try { const settings = { ...defaultOrderSettings, ...(req.body || {}) }; await getDb().execute('INSERT INTO site_content (content_key, content_json) VALUES ("order_settings", ?) ON DUPLICATE KEY UPDATE content_json=VALUES(content_json)', [JSON.stringify(settings)]); res.json({ settings }); } catch (error) { next(error); } });
+app.get('/api/admin/universities', async (req, res, next) => { try { const [rows] = await getDb().query('SELECT * FROM universities ORDER BY sort_order, name'); res.json({ universities: rows.map((row) => ({ ...row, active: Boolean(row.active), coming_soon: Boolean(row.coming_soon) })) }); } catch (error) { next(error); } });
+app.post('/api/admin/universities', async (req, res, next) => { try { const u=req.body||{}; const [result]=await getDb().execute('INSERT INTO universities (name, logo_url, source_url, active, coming_soon, sort_order) VALUES (?, ?, ?, ?, ?, ?)', [u.name, u.logo_url||'', u.source_url||'', u.active===false?0:1, u.coming_soon?1:0, Number(u.sort_order||0)]); const [rows]=await getDb().execute('SELECT * FROM universities WHERE id=?',[result.insertId]); res.status(201).json({ university: rows[0] }); } catch(error){ next(error); } });
+app.put('/api/admin/universities/:id', async (req, res, next) => { try { const u=req.body||{}; await getDb().execute('UPDATE universities SET name=?, logo_url=?, source_url=?, active=?, coming_soon=?, sort_order=? WHERE id=?', [u.name, u.logo_url||'', u.source_url||'', u.active===false?0:1, u.coming_soon?1:0, Number(u.sort_order||0), req.params.id]); const [rows]=await getDb().execute('SELECT * FROM universities WHERE id=?',[req.params.id]); res.json({ university: rows[0] }); } catch(error){ next(error); } });
+app.delete('/api/admin/universities/:id', async (req, res, next) => { try { await getDb().execute('DELETE FROM universities WHERE id=?',[req.params.id]); res.json({ ok:true }); } catch(error){ next(error); } });
+app.patch('/api/admin/orders/:id/payment', async (req, res, next) => { try { const [rows]=await getDb().execute('SELECT order_meta_json FROM orders WHERE id=?',[req.params.id]); if(!rows[0]) return res.status(404).json({error:'NOT_FOUND'}); const meta={...parseJson(rows[0].order_meta_json,{}),paymentStatus:req.body?.paymentStatus||'pending_review'}; await getDb().execute('UPDATE orders SET order_meta_json=? WHERE id=?',[JSON.stringify(meta),req.params.id]); const [updated]=await getDb().execute('SELECT * FROM orders WHERE id=?',[req.params.id]); res.json({order:mapOrder(updated[0])}); } catch(error){ next(error); } });
 
 app.post('/api/admin/uploads', upload.single('file'), async (req, res, next) => {
   try {

@@ -1,34 +1,24 @@
-# الندى | Al Nada — Admin System Outcomes
+# الندى | Al Nada — Delivery Extension Outcomes
 
-## Delivered: Secure admin access
-- Dedicated `/admin/login` with Arabic RTL Al Nada branding, email/username and password fields.
-- Server-side bcrypt password verification against the protected admin credentials configured in the project.
-- Expiring HttpOnly session cookie and role-gated admin APIs.
-- Authenticated admins can use `/admin`; unauthenticated API access returns 401.
+## Admin visual refinement
+Increase admin UI text weight and legibility, slightly enlarge icons, and improve spacing while preserving the existing premium RTL identity and responsive layout.
 
-## Delivered: Dashboard overview
-- `/admin` dashboard with products, orders, sales and customers metrics.
-- Recent orders, best-selling products, monthly sales chart and responsive premium sidebar/cards.
-- Desktop and mobile layout implemented in separate admin HTML/CSS/JS files.
+## Hero and explainer media controls
+Allow admins to upload, replace, delete and preview the homepage Hero video, edit overlay text and buttons, and preserve autoplay, muted playback and looping. Add the same upload/replace/delete/preview capability for a payment-transfer explainer video with editable title and description.
 
-## Delivered: Products and categories management
-- Add, edit and delete products.
-- Product name, description, price, compare-at price, category, sizes, colors, stock, featured state and public visibility.
-- Image URL editing plus authenticated server-side durable upload endpoint for images and MP4 media.
-- Add, edit and delete categories, update category image/order and toggle visibility.
-- Changes persist in managed MySQL tables and are exposed through the public catalog API.
+## Delivery choice and university delivery
+When the customer chooses “اطلبي الآن”, show university delivery and outside-university delivery. University delivery includes cards for Delta University, Mansoura National University, New Mansoura University and Horus University. Use official-source logo URLs where verified; keep each logo/name editable from the admin. Horus is faded, disabled and marked `COMING SOON`. The remaining active universities are selectable.
 
-## Delivered: Full public content management
-- Homepage announcement, hero copy/video URL, About copy, seasonal campaign, campaign image, newsletter text, contact details and social links are editable from the dashboard.
-- Public `/api/public/site` hydrates the storefront so saved content appears without manual code edits.
+After a university selection, require full name, phone and an available pickup date. Available dates are controlled from the admin and only enabled dates appear to customers. Admins can add, edit, enable or disable dates and universities.
 
-## Delivered: Orders management
-- Orders table with search and status filtering.
-- Status updates, deletion, totals and item details are persisted.
-- Public order creation endpoint is available for checkout integration.
+## Payments and order submission
+Offer cash on delivery and prepaid payment. For prepaid payment, show the configured Digital Wallet and InstaPay number, provide copy buttons, explain that the customer must send the transfer image with order details, and keep payment status pending until admin review. Validate required fields, save the order to the real database first, then prepare a WhatsApp message to `01008814332` containing customer, product, product link, quantity, price, delivery method, university/address, pickup date and payment method. Open WhatsApp only after the save succeeds.
 
-## Delivered: Server delivery and verification
-- Server + database capabilities enabled for the managed project.
-- Database migrations/seed data, health endpoint, Dockerfile and deploy contract prepared.
-- Verified `npm run build`, `/_app/health`, public catalog, protected login, overview and admin CRUD API access.
-- Verified the mobile login visually with local Chromium after correcting the preview screenshot tooling’s stale/cropped capture.
+## Outside-university delivery
+Collect full name, phone, detailed address and payment method. Save the same order metadata and prepare the same WhatsApp flow.
+
+## Admin orders and settings
+Show order number, customer data, product/link/quantity/price, delivery method, university/address, pickup date, payment method/status and order date. Support detail view, status changes, payment confirmation after review, cancellation/deletion, search/filtering and WhatsApp contact. Add settings for university CRUD, logos, active/coming-soon state, payment numbers, WhatsApp number, order message, explainer video, available dates, and toggles for university/external delivery.
+
+## Existing delivered outcomes retained
+The existing secure admin login, dashboard metrics, product/category CRUD, content CMS, server/database deployment, public catalog hydration and published routes remain in scope and must continue working.

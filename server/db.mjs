@@ -92,8 +92,20 @@ export async function initDatabase() {
       content_json LONGTEXT NOT NULL,
       updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+    `CREATE TABLE IF NOT EXISTS universities (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      name VARCHAR(190) NOT NULL,
+      logo_url TEXT,
+      source_url TEXT,
+      active TINYINT(1) NOT NULL DEFAULT 1,
+      coming_soon TINYINT(1) NOT NULL DEFAULT 0,
+      sort_order INT NOT NULL DEFAULT 0,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
   ];
   for (const statement of statements) await db.query(statement);
+  try { await db.query('ALTER TABLE orders ADD COLUMN order_meta_json LONGTEXT NULL'); } catch (error) { if (!String(error.message).includes('Duplicate column')) throw error; }
   await seedDefaults(db);
   await syncAdmin(db);
 }
@@ -126,6 +138,26 @@ const defaultContent = {
   tiktok: '#contact',
   pinterest: '#contact',
 };
+
+const defaultOrderSettings = {
+  universityDeliveryEnabled: true,
+  externalDeliveryEnabled: true,
+  whatsappNumber: '01008814332',
+  digitalWallet: '01008814332',
+  instapay: '01061081756',
+  orderMessage: 'مرحباً، أود تأكيد طلبي من الندى. برجاء مراجعة البيانات التالية:',
+  explanationVideo: '',
+  explanationTitle: 'طريقة الدفع المسبق',
+  explanationDescription: 'بعد التحويل، أرسلي صورة التحويل مع اسمكِ ورقم الطلب على واتساب حتى نراجع الدفع ونؤكد الطلب.',
+  deliveryDays: Array.from({ length: 14 }, (_, index) => { const d = new Date(Date.now() + (index + 1) * 86400000); return { date: d.toISOString().slice(0, 10), label: d.toLocaleDateString('ar-EG', { weekday: 'long', day: 'numeric', month: 'long' }) }; }),
+};
+
+const defaultUniversities = [
+  ['جامعة الدلتا', 'https://new.deltauniv.edu.eg/assets/images/logohead.png', 'https://new.deltauniv.edu.eg/en/home/index', 1, 0, 1],
+  ['جامعة المنصورة الأهلية', 'https://www.mansnu.edu.eg/favicon.ico', 'https://www.mansnu.edu.eg/', 1, 0, 2],
+  ['جامعة المنصورة الجديدة', 'https://www.nmu.edu.eg/frontend/assets/img/logo2.png', 'https://www.nmu.edu.eg/', 1, 0, 3],
+  ['جامعة حورس', 'https://horus.edu.eg/wp-content/uploads/2024/06/Logo-blue.png', 'https://horus.edu.eg/', 1, 1, 4],
+];
 
 const defaultCategories = [
   ['ملابس حريمي', `${imageRoot}ke0F8neCfZf4pY3t7t0Z9Q/image-1.webp`, 1],
@@ -160,6 +192,12 @@ async function seedDefaults(db) {
   if (Number(contentCount.count) === 0) {
     await db.execute('INSERT INTO site_content (content_key, content_json) VALUES (?, ?)', ['homepage', JSON.stringify(defaultContent)]);
   }
+  const [[orderSettingsCount]] = await db.query('SELECT COUNT(*) AS count FROM site_content WHERE content_key = "order_settings"');
+  if (Number(orderSettingsCount.count) === 0) await db.execute('INSERT INTO site_content (content_key, content_json) VALUES (?, ?)', ['order_settings', JSON.stringify(defaultOrderSettings)]);
+  const [[universityCount]] = await db.query('SELECT COUNT(*) AS count FROM universities');
+  if (Number(universityCount.count) === 0) {
+    for (const [name, logo, source, active, comingSoon, sortOrder] of defaultUniversities) await db.execute('INSERT INTO universities (name, logo_url, source_url, active, coming_soon, sort_order) VALUES (?, ?, ?, ?, ?, ?)', [name, logo, source, active, comingSoon, sortOrder]);
+  }
   const [[orderCount]] = await db.query('SELECT COUNT(*) AS count FROM orders');
   if (Number(orderCount.count) === 0) {
     const demoOrders = [
@@ -184,4 +222,4 @@ async function syncAdmin(db) {
   }
 }
 
-export { defaultContent };
+export { defaultContent, defaultOrderSettings };
