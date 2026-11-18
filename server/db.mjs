@@ -103,10 +103,34 @@ export async function initDatabase() {
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+    `CREATE TABLE IF NOT EXISTS product_images (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      product_id INT NOT NULL,
+      image_url TEXT NOT NULL,
+      alt_text VARCHAR(190) DEFAULT '',
+      sort_order INT NOT NULL DEFAULT 0,
+      visible TINYINT(1) NOT NULL DEFAULT 1,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      CONSTRAINT fk_product_image_product FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+    `CREATE TABLE IF NOT EXISTS product_variants (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      product_id INT NOT NULL,
+      color_name VARCHAR(100) DEFAULT '',
+      color_value VARCHAR(40) DEFAULT '#e7d7cf',
+      size VARCHAR(30) DEFAULT '',
+      stock INT NOT NULL DEFAULT 0,
+      active TINYINT(1) NOT NULL DEFAULT 1,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      UNIQUE KEY product_variant_unique (product_id, color_name, size),
+      CONSTRAINT fk_product_variant_product FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
   ];
   for (const statement of statements) await db.query(statement);
   try { await db.query('ALTER TABLE orders ADD COLUMN order_meta_json LONGTEXT NULL'); } catch (error) { if (!String(error.message).includes('Duplicate column')) throw error; }
   await seedDefaults(db);
+  await ensureLegacyProductChildren(db);
   await syncAdmin(db);
 }
 
@@ -154,7 +178,7 @@ const defaultOrderSettings = {
 
 const defaultUniversities = [
   ['جامعة الدلتا', 'https://new.deltauniv.edu.eg/assets/images/logohead.png', 'https://new.deltauniv.edu.eg/en/home/index', 1, 0, 1],
-  ['جامعة المنصورة الأهلية', 'https://www.mansnu.edu.eg/favicon.ico', 'https://www.mansnu.edu.eg/', 1, 0, 2],
+  ['جامعة المنصورة الأهلية', '/assets/mansoura-national-logo.svg', 'https://www.mansnu.edu.eg/', 1, 0, 2],
   ['جامعة المنصورة الجديدة', 'https://www.nmu.edu.eg/frontend/assets/img/logo2.png', 'https://www.nmu.edu.eg/', 1, 0, 3],
   ['جامعة حورس', 'https://horus.edu.eg/wp-content/uploads/2024/06/Logo-blue.png', 'https://horus.edu.eg/', 1, 1, 4],
 ];
@@ -208,6 +232,23 @@ async function seedDefaults(db) {
       ['#AN-1044', 'هند عبدالله', 'hind@example.com', '+966500000005', 760, 'delivered', [{ name: 'بليزر ليان', quantity: 2, price: 380 }]],
     ];
     for (const order of demoOrders) await db.execute('INSERT INTO orders (order_number, customer_name, customer_email, customer_phone, total, status, items_json) VALUES (?, ?, ?, ?, ?, ?, ?)', [...order.slice(0, 6), JSON.stringify(order[6])]);
+  }
+}
+
+async function ensureLegacyProductChildren(db) {
+  await db.execute("UPDATE universities SET logo_url = '/assets/mansoura-national-logo.svg' WHERE name = 'جامعة المنصورة الأهلية' AND (logo_url IS NULL OR logo_url = '' OR logo_url = 'https://www.mansnu.edu.eg/favicon.ico' OR logo_url LIKE 'https://www.instagram.%')");
+  const [products] = await db.query('SELECT id, image_url, sizes_json, colors_json, stock FROM products');
+  for (const product of products) {
+    const [[imageCount]] = await db.query('SELECT COUNT(*) AS count FROM product_images WHERE product_id = ?', [product.id]);
+    if (Number(imageCount.count) === 0 && product.image_url) await db.execute('INSERT INTO product_images (product_id, image_url, sort_order, visible) VALUES (?, ?, 0, 1)', [product.id, product.image_url]);
+    const [[variantCount]] = await db.query('SELECT COUNT(*) AS count FROM product_variants WHERE product_id = ?', [product.id]);
+    if (Number(variantCount.count) > 0) continue;
+    const sizes = (() => { try { return JSON.parse(product.sizes_json || '[]'); } catch { return []; } })();
+    const colors = (() => { try { return JSON.parse(product.colors_json || '[]'); } catch { return []; } })();
+    const normalizedSizes = sizes.length ? sizes : [''];
+    const normalizedColors = colors.length ? colors : [['الأساسي', '#e7d7cf']];
+    let order = 0;
+    for (const color of normalizedColors) { const colorName = Array.isArray(color) ? color[0] : color; const colorValue = Array.isArray(color) ? color[1] : '#e7d7cf'; for (const size of normalizedSizes) { await db.execute('INSERT IGNORE INTO product_variants (product_id, color_name, color_value, size, stock, active) VALUES (?, ?, ?, ?, ?, 1)', [product.id, colorName || '', colorValue || '#e7d7cf', size || '', Number(product.stock || 0)]); order += 1; } }
   }
 }
 

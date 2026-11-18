@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 320" role="img" aria-labelledby="title desc">
+  <title id="title">جامعة المنصورة الأهلية</title>
+  <desc id="desc">Mansoura National University monogram</desc>
+  <circle cx="160" cy="160" r="148" fill="#fff" stroke="#8f1d2c" stroke-width="12"/>
+  <circle cx="160" cy="160" r="126" fill="#fffaf7" stroke="#d7b9b0" stroke-width="2"/>
+  <path d="M113 216V112l47 42 47-42v104M133 184h54" fill="none" stroke="#8f1d2c" stroke-width="14" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="160" y="80" text-anchor="middle" font-family="Arial, sans-serif" font-size="13" font-weight="700" fill="#8f1d2c">MANSOURA NATIONAL</text>
+  <text x="160" y="255" text-anchor="middle" font-family="Arial, sans-serif" font-size="15" font-weight="700" fill="#8f1d2c">جامعة المنصورة الأهلية</text>
+</svg>

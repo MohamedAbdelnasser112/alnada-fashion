@@ -1,6 +1,7 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import crypto from 'node:crypto';
+import { readFile } from 'node:fs/promises';
 import express from 'express';
 import multer from 'multer';
 import { authenticate, clearSessionCookie, currentAdmin, logout, requireAdmin, setSessionCookie } from './auth.mjs';
@@ -29,6 +30,21 @@ const parseJson = (value, fallback = []) => {
 const slugify = (value) => String(value || '').trim().toLowerCase().replace(/[^\u0600-\u06ff\w\s-]/g, '').replace(/\s+/g, '-').replace(/-+/g, '-') || `product-${Date.now()}`;
 const mapProduct = (row) => ({ ...row, price: Number(row.price), compare_price: row.compare_price == null ? null : Number(row.compare_price), stock: Number(row.stock), featured: Boolean(row.featured), visible: Boolean(row.visible), sizes: parseJson(row.sizes_json), colors: parseJson(row.colors_json) });
 const mapCategory = (row) => ({ ...row, visible: Boolean(row.visible) });
+async function hydrateProductRows(db, rows) {
+  if (!rows.length) return [];
+  const ids = rows.map((row) => row.id);
+  const placeholders = ids.map(() => '?').join(',');
+  const [imageRows] = await db.execute(`SELECT id, product_id, image_url, alt_text, sort_order, visible FROM product_images WHERE product_id IN (${placeholders}) AND visible = 1 ORDER BY sort_order, id`, ids);
+  const [variantRows] = await db.execute(`SELECT id, product_id, color_name, color_value, size, stock, active FROM product_variants WHERE product_id IN (${placeholders}) ORDER BY id`, ids);
+  const imagesByProduct = new Map(); const variantsByProduct = new Map();
+  for (const image of imageRows) { if (!imagesByProduct.has(image.product_id)) imagesByProduct.set(image.product_id, []); imagesByProduct.get(image.product_id).push({ ...image, visible: Boolean(image.visible) }); }
+  for (const variant of variantRows) { if (!variantsByProduct.has(variant.product_id)) variantsByProduct.set(variant.product_id, []); variantsByProduct.get(variant.product_id).push({ ...variant, stock: Number(variant.stock), active: Boolean(variant.active) }); }
+  return rows.map((row) => { const product = mapProduct(row); const images = imagesByProduct.get(row.id) || (row.image_url ? [{ id: `legacy-${row.id}`, product_id: row.id, image_url: row.image_url, alt_text: row.name, sort_order: 0, visible: true }] : []); const variants = variantsByProduct.get(row.id) || []; return { ...product, images, variants, primary_image: images[0]?.image_url || row.image_url || '' }; });
+}
+async function replaceProductChildren(db, productId, product) {
+  if (Array.isArray(product.images)) { await db.execute('DELETE FROM product_images WHERE product_id = ?', [productId]); for (const [index, image] of product.images.filter((item) => item?.image_url).entries()) await db.execute('INSERT INTO product_images (product_id, image_url, alt_text, sort_order, visible) VALUES (?, ?, ?, ?, 1)', [productId, image.image_url, image.alt_text || '', Number(image.sort_order ?? index)]); }
+  if (Array.isArray(product.variants)) { await db.execute('DELETE FROM product_variants WHERE product_id = ?', [productId]); for (const variant of product.variants) await db.execute('INSERT IGNORE INTO product_variants (product_id, color_name, color_value, size, stock, active) VALUES (?, ?, ?, ?, ?, ?)', [productId, variant.color_name || '', variant.color_value || '#e7d7cf', variant.size || '', Number(variant.stock || 0), variant.active === false ? 0 : 1]); }
+}
 const mapOrder = (row) => ({ ...row, total: Number(row.total), items: parseJson(row.items_json), meta: parseJson(row.order_meta_json, {}) });
 const normalizeWhatsApp = (value) => { const digits = String(value || '').replace(/\D/g, ''); if (digits.startsWith('20')) return digits; if (digits.startsWith('0')) return `20${digits.slice(1)}`; return `20${digits}`; };
 const publicContent = async () => {
@@ -43,9 +59,13 @@ app.get('/api/public/site', async (req, res, next) => {
     const db = getDb();
     const [products] = await db.execute('SELECT p.*, c.name AS category_name FROM products p LEFT JOIN categories c ON c.id = p.category_id WHERE p.visible = 1 ORDER BY p.featured DESC, p.created_at DESC');
     const [categories] = await db.execute('SELECT * FROM categories WHERE visible = 1 ORDER BY sort_order, name');
-    res.json({ content: await publicContent(), products: products.map(mapProduct), categories: categories.map(mapCategory) });
+    res.json({ content: await publicContent(), products: await hydrateProductRows(db, products), categories: categories.map(mapCategory) });
   } catch (error) { next(error); }
 });
+app.get('/api/public/products/:id', async (req, res, next) => {
+  try { const db = getDb(); const [rows] = await db.execute('SELECT p.*, c.name AS category_name FROM products p LEFT JOIN categories c ON c.id = p.category_id WHERE p.id = ? AND p.visible = 1', [req.params.id]); if (!rows[0]) return res.status(404).json({ error: 'NOT_FOUND', message: 'المنتج غير موجود.' }); const products = await hydrateProductRows(db, rows); res.json({ product: products[0] }); } catch (error) { next(error); }
+});
+
 app.get('/api/public/order-config', async (req, res, next) => {
   try {
     const db = getDb();
@@ -75,13 +95,25 @@ app.post('/api/public/orders', async (req, res, next) => {
       if (!(settings.deliveryDays || []).some((day) => day.date === details.deliveryDate)) return res.status(400).json({ error: 'INVALID_PICKUP_DATE', message: 'موعد الاستلام غير متاح.' });
     }
     if (details.deliveryMethod === 'external' && !details.address) return res.status(400).json({ error: 'INVALID_ADDRESS', message: 'أضيفي العنوان بالتفصيل.' });
-    const total = items.reduce((sum, item) => sum + Number(item.price || 0) * Number(item.quantity || 1), 0);
+    const normalizedItems = [];
+    for (const item of items) {
+      const quantity = Math.max(1, Math.floor(Number(item.quantity || 1)));
+      if (item.productId) {
+        const [productRows] = await db.execute('SELECT id, name, price, image_url FROM products WHERE id = ? AND visible = 1', [item.productId]);
+        const product = productRows[0]; if (!product) return res.status(400).json({ error: 'INVALID_PRODUCT', message: 'أحد المنتجات لم يعد متاحاً.' });
+        const [variantRows] = await db.execute('SELECT id, color_name, size, stock, active FROM product_variants WHERE product_id = ? AND color_name = ? AND size = ? LIMIT 1', [item.productId, item.color || '', item.size || '']);
+        if (!variantRows[0] || !variantRows[0].active) return res.status(400).json({ error: 'INVALID_VARIANT', message: 'اختيار اللون أو المقاس غير متاح.' });
+        if (Number(variantRows[0].stock) < quantity) return res.status(400).json({ error: 'OUT_OF_STOCK', message: 'الكمية المطلوبة غير متاحة حالياً.' });
+        normalizedItems.push({ productId: product.id, name: product.name, url: item.url || `/product/${product.id}`, image: item.image || product.image_url, color: variantRows[0].color_name, size: variantRows[0].size, quantity, price: Number(product.price) });
+      } else normalizedItems.push({ ...item, quantity });
+    }
+    const total = normalizedItems.reduce((sum, item) => sum + Number(item.price || 0) * Number(item.quantity || 1), 0);
     const orderNumber = `#AN-${Math.floor(1000 + Math.random() * 8999)}`;
     const paymentStatus = details.paymentMethod === 'prepaid' ? 'pending_review' : 'cash_on_delivery';
     const meta = { ...details, universityName: selectedUniversity?.name || '', whatsappNumber: settings.whatsappNumber, orderMessage: settings.orderMessage, digitalWallet: settings.digitalWallet, instapay: settings.instapay, paymentStatus, transferProof: Boolean(details.transferProof), transferProofData: String(details.transferProof || '').slice(0, 1800000), submittedAt: new Date().toISOString() };
-    await db.execute('INSERT INTO orders (order_number, customer_name, customer_email, customer_phone, total, status, items_json, order_meta_json) VALUES (?, ?, ?, ?, ?, "new", ?, ?)', [orderNumber, customer.name, customer.email || null, customer.phone, total, JSON.stringify(items), JSON.stringify(meta)]);
+    await db.execute('INSERT INTO orders (order_number, customer_name, customer_email, customer_phone, total, status, items_json, order_meta_json) VALUES (?, ?, ?, ?, ?, "new", ?, ?)', [orderNumber, customer.name, customer.email || null, customer.phone, total, JSON.stringify(normalizedItems), JSON.stringify(meta)]);
     const number = normalizeWhatsApp(settings.whatsappNumber || '01008814332');
-    const lines = [details.orderMessage || 'مرحباً، أود تأكيد طلبي من الندى.', `رقم الطلب: ${orderNumber}`, `الاسم: ${customer.name}`, `الهاتف: ${customer.phone}`, ...items.map((item) => `المنتج: ${item.name} | الرابط: ${item.url || ''} | الكمية: ${item.quantity} | السعر: ${item.price} ر.س`), `التوصيل: ${details.deliveryMethod === 'university' ? 'جامعي' : 'خارج الجامعة'}`, details.universityName ? `الجامعة: ${details.universityName}` : `العنوان: ${details.address}`, details.deliveryDate ? `موعد الاستلام: ${details.deliveryDate}` : '', `الدفع: ${details.paymentMethod === 'prepaid' ? 'دفع مسبق — بانتظار مراجعة الإدارة' : 'نقداً عند الاستلام'}`].filter(Boolean);
+    const lines = [details.orderMessage || 'مرحباً، أود تأكيد طلبي من الندى.', `رقم الطلب: ${orderNumber}`, `الاسم: ${customer.name}`, `الهاتف: ${customer.phone}`, ...normalizedItems.map((item) => `المنتج: ${item.name} | الرابط: ${item.url || ''} | الكمية: ${item.quantity} | السعر: ${item.price} ر.س`), `التوصيل: ${details.deliveryMethod === 'university' ? 'جامعي' : 'خارج الجامعة'}`, details.universityName ? `الجامعة: ${details.universityName}` : `العنوان: ${details.address}`, details.deliveryDate ? `موعد الاستلام: ${details.deliveryDate}` : '', `الدفع: ${details.paymentMethod === 'prepaid' ? 'دفع مسبق — بانتظار مراجعة الإدارة' : 'نقداً عند الاستلام'}`].filter(Boolean);
     res.status(201).json({ orderNumber, whatsappUrl: `https://wa.me/${number}?text=${encodeURIComponent(lines.join('\n'))}` });
   } catch (error) { next(error); }
 });
@@ -117,14 +149,14 @@ app.get('/api/admin/overview', async (req, res, next) => {
 });
 
 app.get('/api/admin/products', async (req, res, next) => {
-  try { const [rows] = await getDb().query('SELECT p.*, c.name AS category_name FROM products p LEFT JOIN categories c ON c.id = p.category_id ORDER BY p.created_at DESC'); res.json({ products: rows.map(mapProduct) }); } catch (error) { next(error); }
+  try { const [rows] = await getDb().query('SELECT p.*, c.name AS category_name FROM products p LEFT JOIN categories c ON c.id = p.category_id ORDER BY p.created_at DESC'); res.json({ products: await hydrateProductRows(getDb(), rows) }); } catch (error) { next(error); }
 });
 app.post('/api/admin/products', async (req, res, next) => {
   try {
     const p = req.body || {};
     const slug = slugify(p.slug || p.name);
     const [result] = await getDb().execute('INSERT INTO products (name, slug, description, category_id, price, compare_price, image_url, sizes_json, colors_json, stock, featured, visible) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', [p.name, slug, p.description || '', p.category_id || null, Number(p.price || 0), p.compare_price === '' || p.compare_price == null ? null : Number(p.compare_price), p.image_url || '', JSON.stringify(p.sizes || []), JSON.stringify(p.colors || []), Number(p.stock || 0), p.featured ? 1 : 0, p.visible === false ? 0 : 1]);
-    const [rows] = await getDb().execute('SELECT * FROM products WHERE id = ?', [result.insertId]); res.status(201).json({ product: mapProduct(rows[0]) });
+    await replaceProductChildren(getDb(), result.insertId, p); const [rows] = await getDb().execute('SELECT * FROM products WHERE id = ?', [result.insertId]); res.status(201).json({ product: (await hydrateProductRows(getDb(), rows))[0] });
   } catch (error) { next(error); }
 });
 app.put('/api/admin/products/:id', async (req, res, next) => {
@@ -132,7 +164,7 @@ app.put('/api/admin/products/:id', async (req, res, next) => {
     const p = req.body || {};
     const slug = slugify(p.slug || p.name);
     await getDb().execute('UPDATE products SET name=?, slug=?, description=?, category_id=?, price=?, compare_price=?, image_url=?, sizes_json=?, colors_json=?, stock=?, featured=?, visible=? WHERE id=?', [p.name, slug, p.description || '', p.category_id || null, Number(p.price || 0), p.compare_price === '' || p.compare_price == null ? null : Number(p.compare_price), p.image_url || '', JSON.stringify(p.sizes || []), JSON.stringify(p.colors || []), Number(p.stock || 0), p.featured ? 1 : 0, p.visible === false ? 0 : 1, req.params.id]);
-    const [rows] = await getDb().execute('SELECT * FROM products WHERE id = ?', [req.params.id]); res.json({ product: mapProduct(rows[0]) });
+    await replaceProductChildren(getDb(), req.params.id, p); const [rows] = await getDb().execute('SELECT * FROM products WHERE id = ?', [req.params.id]); res.json({ product: (await hydrateProductRows(getDb(), rows))[0] });
   } catch (error) { next(error); }
 });
 app.delete('/api/admin/products/:id', async (req, res, next) => { try { await getDb().execute('DELETE FROM products WHERE id = ?', [req.params.id]); res.json({ ok: true }); } catch (error) { next(error); } });
@@ -188,6 +220,7 @@ app.post('/api/admin/uploads', upload.single('file'), async (req, res, next) => 
 
 app.use(express.static(dist, { index: 'index.html' }));
 app.get(['/admin', '/admin/', '/admin/login'], (req, res) => res.sendFile(path.join(dist, 'admin', 'index.html')));
+app.get('/product/:id', async (req, res, next) => { try { const html = await readFile(path.join(dist, 'index.html'), 'utf8'); res.type('html').send(html.replaceAll('"./assets/', '"/assets/').replaceAll("'./assets/", "'/assets/")); } catch (error) { next(error); } });
 app.get('/', (req, res) => res.sendFile(path.join(dist, 'index.html')));
 app.get('/manus-routes.json', (req, res) => res.sendFile(path.join(root, 'public', 'manus-routes.json')));
 app.use((error, req, res, next) => { console.error(error); if (res.headersSent) return next(error); res.status(500).json({ error: 'SERVER_ERROR', message: 'حدث خطأ غير متوقع.' }); });
